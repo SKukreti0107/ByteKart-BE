@@ -3,6 +3,7 @@ from sqlalchemy import Column
 from uuid import uuid4, UUID
 from typing import Optional, Dict, Any,List
 from enum import Enum
+from datetime import datetime, timezone
 
 class StockStatus(str, Enum):
     IN_STOCK = "in-stock"
@@ -76,3 +77,29 @@ class HeroContent(SQLModel, table=True):
     priority: int = Field(default=10)
     start_date: Optional[str] = None # Using ISO 8601 string for simplicity in JS/Python boundaries
     end_date: Optional[str] = None
+
+class OrderStatus(str, Enum):
+    PENDING = "pending"
+    PAID = "paid"
+    FAILED = "failed"
+    SHIPPED = "shipped"
+    DELIVERED = "delivered"
+
+class Order(SQLModel, table=True):
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    user_id: UUID = Field(foreign_key="neon_auth.user.id")
+    razorpay_order_id: Optional[str] = None
+    razorpay_payment_id: Optional[str] = None
+    items: List[Dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
+    shipping_address: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    shipping_fee: float = Field(default=0.0)
+    total_amount: float
+    status: OrderStatus = Field(default=OrderStatus.PENDING)
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class CheckoutDetails(SQLModel, table=True):
+    user_id: UUID = Field(primary_key=True, foreign_key="neon_auth.user.id")
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    pincode: Optional[str] = None

@@ -6,9 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List,Optional
 
 from db import init_db, get_session
-from models import Product, Listing, Request,Category,SubCategory,Brand, User, HeroContent, ShoppingCart
+from models import Product, Listing, Request,Category,SubCategory,Brand, User, HeroContent, ShoppingCart, Order, OrderStatus, CheckoutDetails
 from auth import get_current_user, admin_only, get_db_user
 from datetime import datetime, timezone
+
+from helpers.verify_payment_sig import get_razorpay_client, verify_payment as verify_razorpay_payment
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -24,6 +26,9 @@ app.add_middleware(
         "https://byte-kart.vercel.app",
         "http://localhost:5173",
         "http://localhost:3000",
+        "http://127.0.0.1:5500",
+        "http://localhost:5500",
+        "null"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -191,6 +196,161 @@ async def update_user_cart(
     await session.commit()
     await session.refresh(db_cart)
     return db_cart
+
+from pydantic import BaseModel
+from typing import Dict
+
+
+class OrderData(BaseModel):
+    shipping_address: Dict
+    shipping_fee: float
+
+class OrderStatusUpdate(BaseModel):
+    status: OrderStatus
+
+class PaymentsDeets(BaseModel):
+    razorpay_order_id:str
+    razorpay_payment_id:str
+    razorpay_signature:str
+
+
+@app.post("/orders")
+async def create_order(
+    order_data: OrderData,
+    current_user: User = Depends(get_db_user),
+    session: AsyncSession = Depends(get_session),
+    client = Depends(get_razorpay_client)
+):
+    # Fetch user's cart to calculate the secure total
+    result = await session.execute(select(ShoppingCart).where(ShoppingCart.user_id == current_user.id))
+    cart = result.scalars().first()
+    
+    if not cart or not cart.items:
+        raise HTTPException(status_code=400, detail="Cart is empty")
+
+    # Securely calculate total amount
+    subtotal = sum(item.get('price', 0) * item.get('quantity', 1) for item in cart.items)
+    total_amount = subtotal + order_data.shipping_fee
+
+    # Create Razorpay Order (amount in subunits/paise)
+    razorpay_amount = int(total_amount * 100)
+    razorpay_order = client.order.create({
+        "amount": razorpay_amount,
+        "currency": "INR",
+    })
+
+    # Save PENDING Order in DB
+    new_order = Order(
+        user_id=current_user.id,
+        razorpay_order_id=razorpay_order["id"],
+        items=cart.items,
+        shipping_address=order_data.shipping_address,
+        shipping_fee=order_data.shipping_fee,
+        total_amount=total_amount,
+        status=OrderStatus.PENDING
+    )
+    session.add(new_order)
+
+    # Upsert CheckoutDetails
+    db_details = await session.execute(select(CheckoutDetails).where(CheckoutDetails.user_id == current_user.id))
+    detail = db_details.scalars().first()
+    
+    address_data = order_data.shipping_address
+    if not detail:
+        detail = CheckoutDetails(user_id=current_user.id)
+        
+    detail.phone = address_data.get('phone', detail.phone)
+    detail.address = address_data.get('address', detail.address)
+    detail.city = address_data.get('city', detail.city)
+    detail.pincode = address_data.get('pincode', detail.pincode)
+    session.add(detail)
+
+    await session.commit()
+    await session.refresh(new_order)
+
+    return razorpay_order
+
+@app.post("/verify/payment")
+async def verify_payment_endpoint(
+    payment_deets:PaymentsDeets,
+    current_user: User = Depends(get_db_user),
+    session: AsyncSession = Depends(get_session),
+    client=Depends(get_razorpay_client),
+):
+    is_valid = verify_razorpay_payment(
+        razorpay_order_id=payment_deets.razorpay_order_id,
+        razorpay_payment_id=payment_deets.razorpay_payment_id,
+        razorpay_signature=payment_deets.razorpay_signature,
+        client=client
+    )
+    if is_valid:
+        # Update order status
+        result = await session.execute(select(Order).where(Order.razorpay_order_id == payment_deets.razorpay_order_id))
+        order = result.scalars().first()
+        if order:
+            order.status = OrderStatus.PAID
+            order.razorpay_payment_id = payment_deets.razorpay_payment_id
+            session.add(order)
+
+            # Clear user cart
+            cart_result = await session.execute(select(ShoppingCart).where(ShoppingCart.user_id == current_user.id))
+            cart = cart_result.scalars().first()
+            if cart:
+                cart.items = []
+                session.add(cart)
+                
+            await session.commit()
+            
+        return {"status": "success", "message": "Payment verified successfully", "order_id": order.id if order else None}
+    else:
+        raise HTTPException(status_code=400, detail="Signature verification failed")
+
+@app.get("/user/shipping_address")
+async def get_user_shipping_address(
+    current_user: User = Depends(get_db_user),
+    session: AsyncSession = Depends(get_session)
+):
+    result = await session.execute(
+        select(CheckoutDetails).where(CheckoutDetails.user_id == current_user.id)
+    )
+    details = result.scalars().first()
+    if details:
+        return {
+            "phone": details.phone,
+            "address": details.address,
+            "city": details.city,
+            "pincode": details.pincode
+        }
+    return {}
+
+@app.get("/orders", response_model=List[Order])
+async def get_orders(
+    current_user: User = Depends(get_db_user),
+    session: AsyncSession = Depends(get_session)
+):
+    result = await session.execute(
+        select(Order)
+        .where(Order.user_id == current_user.id)
+        .order_by(Order.created_at.desc())
+    )
+    return result.scalars().all()
+
+@app.get("/orders/{id}", response_model=Order)
+async def get_order(
+    id: str,
+    current_user: User = Depends(get_db_user),
+    session: AsyncSession = Depends(get_session)
+):
+    result = await session.execute(select(Order).where(Order.id == id, Order.user_id == current_user.id))
+    order = result.scalars().first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return order
+
+@app.get("/razorpay/config")
+async def get_razorpay_config():
+    import os
+    return {"key_id": os.getenv("RAZOR_PAY_KEY_ID")}
 
 # --- Admin Routes ---
 
@@ -453,6 +613,65 @@ async def admin_delete_hero(
     await session.delete(db_hero)
     await session.commit()
     return {"message": "Hero content deleted successfully"}
+
+# --- Admin Routes: Orders ---
+
+@app.get("/admin/orders", response_model=List[Order])
+async def admin_get_all_orders(
+    current_user: User = Depends(admin_only),
+    session: AsyncSession = Depends(get_session)
+):
+    result = await session.execute(select(Order).order_by(Order.created_at.desc()))
+    return result.scalars().all()
+
+@app.put("/admin/orders/{id}/status", response_model=Order)
+async def admin_update_order_status(
+    id: str,
+    update_data: OrderStatusUpdate,
+    current_user: User = Depends(admin_only),
+    session: AsyncSession = Depends(get_session)
+):
+    result = await session.execute(select(Order).where(Order.id == id))
+    order = result.scalars().first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+        
+    order.status = update_data.status
+    session.add(order)
+    await session.commit()
+    await session.refresh(order)
+    return order
+
+# --- Admin Dashboard Stats ---
+@app.get("/admin/dashboard-stats")
+async def get_admin_dashboard_stats(
+    current_user: User = Depends(admin_only),
+    session: AsyncSession = Depends(get_session)
+):
+    from sqlalchemy import func
+    
+    # Total Products (Listings)
+    products_count = (await session.execute(select(func.count(Listing.id)))).scalar() or 0
+    
+    # Total Orders
+    orders_count = (await session.execute(select(func.count(Order.id)))).scalar() or 0
+    
+    # Total Revenue (sum of total_amount where status is paid, shipped, or delivered)
+    revenue_result = await session.execute(
+        select(func.sum(Order.total_amount))
+        .where(Order.status.in_([OrderStatus.PAID, OrderStatus.SHIPPED, OrderStatus.DELIVERED]))
+    )
+    revenue_sum = revenue_result.scalar() or 0.0
+    
+    # Pending Requests
+    requests_count = (await session.execute(select(func.count(Request.id)))).scalar() or 0
+    
+    return {
+        "totalProducts": products_count,
+        "totalOrders": orders_count,
+        "revenue": revenue_sum,
+        "pendingRequests": requests_count
+    }
 
 if __name__ == "__main__":
     import uvicorn
