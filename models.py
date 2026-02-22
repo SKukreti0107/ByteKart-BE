@@ -18,9 +18,9 @@ class Product(SQLModel, table=True):
 
 class Listing(SQLModel, table=True):
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    category_id: str
-    subcategory_id: Optional[str] = None
-    brand_id: str = Field(foreign_key="brand.id")
+    category_id: str = Field(index=True)
+    subcategory_id: Optional[str] = Field(default=None, index=True)
+    brand_id: str = Field(foreign_key="brand.id", index=True)
     name: str
     MRP: float
     supplier_price: float
@@ -87,14 +87,14 @@ class OrderStatus(str, Enum):
 
 class Order(SQLModel, table=True):
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
-    user_id: UUID = Field(foreign_key="neon_auth.user.id")
+    user_id: UUID = Field(foreign_key="neon_auth.user.id", index=True)
     razorpay_order_id: Optional[str] = None
     razorpay_payment_id: Optional[str] = None
     items: List[Dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
     shipping_address: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     shipping_fee: float = Field(default=0.0)
     total_amount: float
-    status: OrderStatus = Field(default=OrderStatus.PENDING)
+    status: OrderStatus = Field(default=OrderStatus.PENDING, index=True)
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class CheckoutDetails(SQLModel, table=True):

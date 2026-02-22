@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, status, Query
+from fastapi import FastAPI, Depends, HTTPException, status, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List,Optional
@@ -18,6 +19,9 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(lifespan=lifespan)
+
+# Compression Middleware
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # CORS Configuration
 app.add_middleware(
@@ -74,18 +78,23 @@ async def get_active_hero(session: AsyncSession = Depends(get_session)):
     }
 
 @app.get("/products", response_model=List[Product])
-async def list_products(session: AsyncSession = Depends(get_session)):
+async def list_products(response: Response, session: AsyncSession = Depends(get_session)):
+    response.headers["Cache-Control"] = "public, max-age=300"
     result = await session.execute(select(Product))
     products = result.scalars().all()
     return products
 
 @app.get("/listings", response_model=List[Listing])
 async def list_listings(
+    response: Response,
     session: AsyncSession = Depends(get_session),
     category_id: Optional[str] = Query(None),
     subCategory_id: Optional[str] = Query(None),
     brand_id: Optional[str] = Query(None),
+    limit: int = Query(40, le=100),
+    offset: int = Query(0, ge=0)
     ):
+    response.headers["Cache-Control"] = "public, max-age=300"
     stmt = select(Listing)
     if category_id:
         stmt = stmt.where(Listing.category_id == category_id)
@@ -93,6 +102,10 @@ async def list_listings(
         stmt = stmt.where(Listing.subcategory_id == subCategory_id)
     if brand_id:
         stmt = stmt.where(Listing.brand_id == brand_id)
+    
+    # Appending Limit and Offset
+    stmt = stmt.offset(offset).limit(limit)
+    
     result = await session.execute(stmt)
     listings = result.scalars().all()
     return listings
@@ -109,16 +122,19 @@ async def get_listing(
     return listing
 
 @app.get("/categories",response_model=list[Category])
-async def list_categories(session:AsyncSession = Depends(get_session)):
+async def list_categories(response: Response, session:AsyncSession = Depends(get_session)):
+    response.headers["Cache-Control"] = "public, max-age=300"
     result = await session.execute(select(Category))
     categories = result.scalars().all()
     return categories
 
 @app.get("/subCategories",response_model=list[SubCategory])
 async def list_sub_categories(
+    response: Response,
     session:AsyncSession = Depends(get_session),
     category_id: Optional[str] = Query(None),
     ):
+    response.headers["Cache-Control"] = "public, max-age=300"
     stmt = select(SubCategory)
     if category_id:
         stmt = stmt.where(SubCategory.category_id == category_id)
@@ -128,9 +144,11 @@ async def list_sub_categories(
 
 @app.get("/brands", response_model=List[Brand])
 async def list_brands(
+    response: Response,
     session: AsyncSession = Depends(get_session),
     subCategory_id: Optional[str] = Query(None)
 ):
+    response.headers["Cache-Control"] = "public, max-age=300"
     stmt = select(Brand)
     if subCategory_id:
         stmt = stmt.join(Listing, Brand.id == Listing.brand_id).where(Listing.subcategory_id == subCategory_id).distinct()
