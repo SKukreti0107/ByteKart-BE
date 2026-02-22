@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List,Optional
 
 from db import init_db, get_session
-from models import Product, Listing, Request,Category,SubCategory,Brand, User, HeroContent
+from models import Product, Listing, Request,Category,SubCategory,Brand, User, HeroContent, ShoppingCart
 from auth import get_current_user, admin_only, get_db_user
 from datetime import datetime, timezone
 
@@ -20,7 +20,11 @@ app = FastAPI(lifespan=lifespan)
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Update with your frontend domain in production
+    allow_origins=[
+        "https://byte-kart.vercel.app",
+        "http://localhost:5173",
+        "http://localhost:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -148,6 +152,45 @@ async def create_request(
     await session.commit()
     await session.refresh(request_data)
     return request_data
+
+@app.get("/cart", response_model=ShoppingCart)
+async def get_user_cart(
+    current_user: User = Depends(get_db_user),
+    session: AsyncSession = Depends(get_session)
+):
+    result = await session.execute(select(ShoppingCart).where(ShoppingCart.user_id == current_user.id))
+    cart = result.scalars().first()
+    
+    # If no cart exists for the user yet, return an empty cart object
+    if not cart:
+        return ShoppingCart(user_id=current_user.id, items=[])
+        
+    return cart
+
+@app.put("/cart", response_model=ShoppingCart)
+async def update_user_cart(
+    cart_update: ShoppingCart,
+    current_user: User = Depends(get_db_user),
+    session: AsyncSession = Depends(get_session)
+):
+    # Ensure the user is only updating their own cart
+    if str(cart_update.user_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized to update this cart")
+        
+    result = await session.execute(select(ShoppingCart).where(ShoppingCart.user_id == current_user.id))
+    db_cart = result.scalars().first()
+    
+    if db_cart:
+        db_cart.items = cart_update.items
+        session.add(db_cart)
+    else:
+        # Create new cart if it doesn't exist
+        db_cart = ShoppingCart(user_id=current_user.id, items=cart_update.items)
+        session.add(db_cart)
+        
+    await session.commit()
+    await session.refresh(db_cart)
+    return db_cart
 
 # --- Admin Routes ---
 

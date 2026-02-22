@@ -1,22 +1,13 @@
 from sqlmodel import SQLModel, Field, JSON
 from sqlalchemy import Column
 from uuid import uuid4, UUID
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any,List
 from enum import Enum
 
 class StockStatus(str, Enum):
     IN_STOCK = "in-stock"
     LOW_STOCK = "low-stock"
     OUT_OF_STOCK = "out-of-stock"
-
-class ItemStatus(str, Enum):
-    OPEN_BOX = "OpenBox"
-    NEW = "New"
-    RETURNED = "Returned"
-    USED = "used"
-    PREOWNED = "preowned"
-
-
 
 class Product(SQLModel, table=True):
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
@@ -30,9 +21,12 @@ class Listing(SQLModel, table=True):
     subcategory_id: Optional[str] = None
     brand_id: str = Field(foreign_key="brand.id")
     name: str
-    price: float
+    MRP: float
+    supplier_price: float
+    our_cut: float
+    variants: Optional[List[Dict[str, Any]]] = Field(default_factory=list, sa_column=Column(JSON))
+    variant_combinations: Optional[List[Dict[str, Any]]] = Field(default_factory=list, sa_column=Column(JSON))
     stock_status: StockStatus
-    item_status: ItemStatus
     description: Optional[str] = None
     image_url: str | None = None
 
@@ -50,6 +44,10 @@ class Request(SQLModel, table=True):
     user_id: UUID = Field(foreign_key="neon_auth.user.id")
     product_id: str
     message: Optional[str] = None
+
+class ShoppingCart(SQLModel, table=True):
+    user_id: UUID = Field(primary_key=True, foreign_key="neon_auth.user.id")
+    items: List[Dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
 
 class Category(SQLModel, table=True):
     id: str = Field(default_factory=lambda:(str(uuid4())),primary_key=True)
