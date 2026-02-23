@@ -91,6 +91,7 @@ async def list_listings(
     category_id: Optional[str] = Query(None),
     subCategory_id: Optional[str] = Query(None),
     brand_id: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
     limit: int = Query(40, le=100),
     offset: int = Query(0, ge=0)
     ):
@@ -102,6 +103,8 @@ async def list_listings(
         stmt = stmt.where(Listing.subcategory_id == subCategory_id)
     if brand_id:
         stmt = stmt.where(Listing.brand_id == brand_id)
+    if search:
+        stmt = stmt.where(Listing.name.ilike(f"%{search}%"))
     
     # Appending Limit and Offset
     stmt = stmt.offset(offset).limit(limit)
