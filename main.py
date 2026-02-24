@@ -12,6 +12,7 @@ from auth import get_current_user, admin_only, get_db_user
 from datetime import datetime, timezone
 
 from helpers.verify_payment_sig import get_razorpay_client, verify_payment as verify_razorpay_payment
+from helpers.email_service import send_order_confirmation_email, send_order_status_update_email
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -321,6 +322,16 @@ async def verify_payment_endpoint(
                 session.add(cart)
                 
             await session.commit()
+
+            # Send order confirmation email
+            await send_order_confirmation_email(
+                user_email=current_user.email,
+                user_name=current_user.name or "Customer",
+                order_id=str(order.id),
+                amount=order.total_amount,
+                items=order.items,
+                created_at=order.created_at
+            )
             
         return {"status": "success", "message": "Payment verified successfully", "order_id": order.id if order else None}
     else:
@@ -661,6 +672,18 @@ async def admin_update_order_status(
     session.add(order)
     await session.commit()
     await session.refresh(order)
+
+    # Fetch user to get their email
+    user_result = await session.execute(select(User).where(User.id == order.user_id))
+    user = user_result.scalars().first()
+    if user:
+        await send_order_status_update_email(
+            user_email=user.email,
+            user_name=user.name or "Customer",
+            order_id=str(order.id),
+            new_status=order.status.value
+        )
+
     return order
 
 # --- Admin Dashboard Stats ---
