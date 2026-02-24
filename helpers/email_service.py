@@ -137,3 +137,28 @@ async def send_order_status_update_email(user_email: str, user_name: str, order_
         return email
     except Exception as e:
         print(f"Failed to send order status update email: {e}")
+
+
+async def send_email_to_admin(action:str ,subject: str, body: str):
+    client = get_resend_client()
+    if not client:
+        return
+
+    try:
+        admin_emails = ["shubhamkukreti.0107@gmail.com","nathansaul20@gmail.com"]
+        if action == "new_order":
+            subject = "New Order Received - " + subject
+        elif action == "order_cancellation":
+            subject = "Order Cancellation - " + subject
+        
+        for email in admin_emails:
+            params:client.Emails.SendParams = {
+                "from": "ByteKart <onboarding@resend.dev>",
+                "to": email,
+                "subject": subject,
+                "html": body
+            }
+            client.Emails.SendResponse = client.Emails.send(params)
+            print(f"Email sent to admin: {subject}")
+    except Exception as e:
+        print(f"Failed to send email to admin: {e}")

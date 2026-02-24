@@ -12,7 +12,10 @@ from auth import get_current_user, admin_only, get_db_user
 from datetime import datetime, timezone
 
 from helpers.verify_payment_sig import get_razorpay_client, verify_payment as verify_razorpay_payment
-from helpers.email_service import send_order_confirmation_email, send_order_status_update_email
+from helpers.email_service import send_order_confirmation_email, send_order_status_update_email, send_email_to_admin
+
+import logging
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -256,10 +259,14 @@ async def create_order(
 
     # Create Razorpay Order (amount in subunits/paise)
     razorpay_amount = int(total_amount * 100)
-    razorpay_order = client.order.create({
-        "amount": razorpay_amount,
-        "currency": "INR",
-    })
+    try:
+        razorpay_order = client.order.create({
+            "amount": razorpay_amount,
+            "currency": "INR",
+        })
+    except Exception as e:
+        logging.error(f"Razorpay order creation failed: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Payment gateway error. Please try again.")
 
     # Save PENDING Order in DB
     new_order = Order(
@@ -287,8 +294,13 @@ async def create_order(
     detail.pincode = address_data.get('pincode', detail.pincode)
     session.add(detail)
 
-    await session.commit()
-    await session.refresh(new_order)
+    try:
+        await session.commit()
+        await session.refresh(new_order)
+    except Exception as e:
+        await session.rollback()
+        logging.error(f"Database error saving order: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not process order.")
 
     return razorpay_order
 
@@ -299,12 +311,16 @@ async def verify_payment_endpoint(
     session: AsyncSession = Depends(get_session),
     client=Depends(get_razorpay_client),
 ):
-    is_valid = verify_razorpay_payment(
-        razorpay_order_id=payment_deets.razorpay_order_id,
-        razorpay_payment_id=payment_deets.razorpay_payment_id,
-        razorpay_signature=payment_deets.razorpay_signature,
-        client=client
-    )
+    try:
+        is_valid = verify_razorpay_payment(
+            razorpay_order_id=payment_deets.razorpay_order_id,
+            razorpay_payment_id=payment_deets.razorpay_payment_id,
+            razorpay_signature=payment_deets.razorpay_signature,
+            client=client
+        )
+    except Exception as e:
+        logging.error(f"Razorpay verification error: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Payment verification service error")
     if is_valid:
         # Update order status
         result = await session.execute(select(Order).where(Order.razorpay_order_id == payment_deets.razorpay_order_id))
@@ -321,17 +337,27 @@ async def verify_payment_endpoint(
                 cart.items = []
                 session.add(cart)
                 
-            await session.commit()
+            try:
+                await session.commit()
+            except Exception as e:
+                await session.rollback()
+                logging.error(f"Database error during payment validation for Order {order.id}: {e}")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Payment validated but failed to update order status.")
 
             # Send order confirmation email
-            await send_order_confirmation_email(
-                user_email=current_user.email,
-                user_name=current_user.name or "Customer",
-                order_id=str(order.id),
-                amount=order.total_amount,
-                items=order.items,
-                created_at=order.created_at
-            )
+            try:
+                await send_order_confirmation_email(
+                    user_email=current_user.email,
+                    user_name=current_user.name or "Customer",
+                    order_id=str(order.id),
+                    amount=order.total_amount,
+                    items=order.items,
+                    created_at=order.created_at
+                )
+                await send_email_to_admin("new_order",f"Order {order.id} has been placed",f"Order placed by {current_user.name} for items {', '.join([item['name'] for item in order.items])} and total amount is {order.total_amount}")
+            except Exception as e:
+                import logging
+                logging.error(f"Failed to send order confirmation emails: {e}")
             
         return {"status": "success", "message": "Payment verified successfully", "order_id": order.id if order else None}
     else:
@@ -670,19 +696,27 @@ async def admin_update_order_status(
         
     order.status = update_data.status
     session.add(order)
-    await session.commit()
-    await session.refresh(order)
+    try:
+        await session.commit()
+        await session.refresh(order)
+    except Exception as e:
+        await session.rollback()
+        logging.error(f"Database error updating order status: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update order status.")
 
     # Fetch user to get their email
     user_result = await session.execute(select(User).where(User.id == order.user_id))
     user = user_result.scalars().first()
     if user:
-        await send_order_status_update_email(
-            user_email=user.email,
-            user_name=user.name or "Customer",
-            order_id=str(order.id),
-            new_status=order.status.value
-        )
+        try:
+            await send_order_status_update_email(
+                user_email=user.email,
+                user_name=user.name or "Customer",
+                order_id=str(order.id),
+                new_status=order.status.value
+            )
+        except Exception as e:
+            logging.error(f"Failed to send order status update email: {e}")
 
     return order
 
