@@ -185,9 +185,11 @@ async def create_request(
 
 @app.get("/cart", response_model=ShoppingCart)
 async def get_user_cart(
+    response: Response,
     current_user: User = Depends(get_db_user),
     session: AsyncSession = Depends(get_session)
 ):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     result = await session.execute(select(ShoppingCart).where(ShoppingCart.user_id == current_user.id))
     cart = result.scalars().first()
     
@@ -365,9 +367,11 @@ async def verify_payment_endpoint(
 
 @app.get("/user/shipping_address")
 async def get_user_shipping_address(
+    response: Response,
     current_user: User = Depends(get_db_user),
     session: AsyncSession = Depends(get_session)
 ):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     result = await session.execute(
         select(CheckoutDetails).where(CheckoutDetails.user_id == current_user.id)
     )
@@ -383,9 +387,11 @@ async def get_user_shipping_address(
 
 @app.get("/orders", response_model=List[Order])
 async def get_orders(
+    response: Response,
     current_user: User = Depends(get_db_user),
     session: AsyncSession = Depends(get_session)
 ):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     result = await session.execute(
         select(Order)
         .where(Order.user_id == current_user.id)
