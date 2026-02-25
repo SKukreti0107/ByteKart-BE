@@ -14,51 +14,32 @@ async def send_order_confirmation_email(user_email: str, user_name: str, order_i
     if not client:
         return
 
-    items_html = ""
+    # Generate ITEM_LIST as an HTML <ul>
+    item_list_html = "<ul>"
     for item in items:
         name = item.get("name", "Item")
         qty = item.get("quantity", 1)
         price = item.get("price", 0)
-        # Format price to remove .0 if it's a whole number
         display_price = int(price) if price == int(price) else price
-        items_html += f'''
-        <tr>
-            <td style="padding: 6px 0; border-bottom: 1px dashed rgba(0, 0, 153, 0.15); color: #000099; font-weight: bold; line-height: 1.2;">{name}</td>
-            <td style="padding: 6px 0; text-align: center; border-bottom: 1px dashed rgba(0, 0, 153, 0.15); color: #000099; font-weight: bold; width: 40px;">x{qty}</td>
-            <td style="padding: 6px 0; text-align: right; border-bottom: 1px dashed rgba(0, 0, 153, 0.15); color: #000099; font-weight: bold; width: 80px;">₹{display_price}</td>
-        </tr>
-        '''
+        item_list_html += f"<li>{name} x{qty} - ₹{display_price}</li>"
+    item_list_html += "</ul>"
 
-    friendly_date = str(created_at)[:10] if created_at else "Now"
-    
-    # Format total amount
     display_amount = int(amount) if amount == int(amount) else amount
 
-    # Read the HTML template
-    template_path = os.path.join("public", "email_template", "order_placed.html")
     try:
-        with open(template_path, "r", encoding="utf-8") as f:
-            template_content = f.read()
-    except Exception as e:
-        print(f"Error reading email template: {e}")
-        # Fallback to a simple message if template is missing
-        template_content = f"Order Confirmation: {order_id}. Total: ₹{amount}"
-
-    # Replace placeholders
-    base_api_url = os.getenv("BASE_API_URL", "https://api.bytekart.co.in")
-    html_content = template_content.replace("{{user_name}}", user_name)
-    html_content = html_content.replace("{{order_id}}", order_id)
-    html_content = html_content.replace("{{friendly_date}}", friendly_date)
-    html_content = html_content.replace("{{items_html}}", items_html)
-    html_content = html_content.replace("{{amount}}", str(display_amount))
-    html_content = html_content.replace("{{base_api_url}}", base_api_url)
-
-    try:
-        params :client.Emails.SendParams = {
+        params: client.Emails.SendParams = {
             "from": "ByteKart <onboarding@resend.dev>",
-            "to": user_email,
+            "to": [user_email],
             "subject": f"ByteKart: Order Confirmation - {order_id}",
-            "html": html_content
+            "template": {
+                "id": "order-placed",
+                "variables": {
+                    "USER_NAME": user_name,
+                    "ORDER_ID": order_id,
+                    "ITEM_LIST": item_list_html,
+                    "TOTAL_AMOUNT": str(display_amount)
+                }
+            }
         }
         email: client.Emails.SendResponse = client.Emails.send(params)
         print(f"Order confirmation email sent to {user_email}")
@@ -67,33 +48,27 @@ async def send_order_confirmation_email(user_email: str, user_name: str, order_i
     except Exception as e:
         print(f"Failed to send order confirmation email: {e}")
 
-async def send_order_status_update_email(user_email: str, user_name: str, order_id: str, new_status: str):
+async def send_order_status_update_email(user_email: str, user_name: str, order_id: str, new_status: str, amount: float = 0):
     client = get_resend_client()
     if not client:
         return
 
-    # Select template based on status
-    template_file = "order_shipped.html" if new_status.lower() == "shipped" else "order_delivered.html"
-    template_path = os.path.join("public", "email_template", template_file)
-    
-    try:
-        with open(template_path, "r", encoding="utf-8") as f:
-            template_content = f.read()
-    except Exception as e:
-        print(f"Error reading email template: {e}")
-        template_content = f"Order {order_id} status updated to: {new_status}"
-
-    base_api_url = os.getenv("BASE_API_URL", "https://api.bytekart.co.in")
-    html_content = template_content.replace("{{user_name}}", user_name)
-    html_content = html_content.replace("{{order_id}}", order_id)
-    html_content = html_content.replace("{{base_api_url}}", base_api_url)
+    template_alias = "order-shipped" if new_status.lower() == "shipped" else "order-delivered"
+    display_amount = int(amount) if amount == int(amount) else amount
 
     try:
-        params:client.Emails.SendParams = {
+        params: client.Emails.SendParams = {
             "from": "ByteKart <onboarding@resend.dev>",
-            "to": user_email,
+            "to": [user_email],
             "subject": f"ByteKart: Order Status Update - {order_id}",
-            "html": html_content
+            "template": {
+                "id": template_alias,
+                "variables": {
+                    "USER_NAME": user_name,
+                    "ORDER_ID": order_id,
+                    "TOTAL_AMOUNT": str(display_amount)
+                }
+            }
         }
         email: client.Emails.SendResponse = client.Emails.send(params)
         print(f"Order status update email sent to {user_email}")
@@ -111,24 +86,17 @@ async def send_thanks_after_delivery_email(user_email: str, user_name: str):
     if not client:
         return
 
-    template_path = os.path.join("public", "email_template", "thanks_after_delivery.html")
     try:
-        with open(template_path, "r", encoding="utf-8") as f:
-            template_content = f.read()
-    except Exception as e:
-        print(f"Error reading email template: {e}")
-        template_content = f"Thank you for shopping with ByteKart, {user_name}!"
-
-    base_api_url = os.getenv("BASE_API_URL", "https://api.bytekart.co.in")
-    html_content = template_content.replace("{{user_name}}", user_name)
-    html_content = html_content.replace("{{base_api_url}}", base_api_url)
-
-    try:
-        params:client.Emails.SendParams = {
+        params: client.Emails.SendParams = {
             "from": "ByteKart <onboarding@resend.dev>",
-            "to": user_email,
+            "to": [user_email],
             "subject": "ByteKart: Thank You!",
-            "html": html_content
+            "template": {
+                "id": "our-thanks",
+                "variables": {
+                    "USER_NAME": user_name
+                }
+            }
         }
         email: client.Emails.SendResponse = client.Emails.send(params)
         print(f"Thanks email sent to {user_email}")
