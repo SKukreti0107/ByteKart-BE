@@ -34,7 +34,7 @@ app.add_middleware(
     allow_origins=[
         "https://byte-kart.vercel.app",
         "http://localhost:5173",
-        "https://bytekart.co.in",
+        "https://www.bytekart.co.in",
         "null"
     ],
     allow_credentials=True,
