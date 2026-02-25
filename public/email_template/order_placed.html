@@ -12,38 +12,29 @@
         style="background-color: #f4f4f4;">
         <tr>
             <td align="center" style="padding: 20px 0;">
-                <!-- Main Background Image Container -->
                 <div
-                    style="width: 100%; max-width: 600px; margin: 0 auto; background-image: url('{{base_api_url}}/public/email_artifacts/order_email_background.png'); background-size: 100% 100%; background-repeat: no-repeat; background-position: top center; min-height: 850px; position: relative;">
-                    <!-- Receipt Paper Overlay Container -->
+                    style="width: 100%; max-width: 600px; margin: 0 auto; background-image: url('{{base_api_url}}/public/email_backgrounds/order_placed.png'); background-size: 100% 100%; background-repeat: no-repeat; background-position: top center; min-height: 850px; position: relative;">
                     <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
                         <tr>
                             <td align="center" style="padding-top: 220px;">
                                 <div
                                     style="background-image: url('{{base_api_url}}/public/email_artifacts/reciept_paper.png'); background-size: contain; background-repeat: no-repeat; background-position: center top; width: 380px; min-height: 520px; margin: 0 auto; border:none; box-sizing: border-box;">
-
-                                    <!-- Slanted Text Content inside the Receipt -->
                                     <div
                                         style="transform: rotate(-6deg); transform-origin: center center; width: 300px; margin: 0 auto; padding-top: 110px; padding-left: 20px; font-family: 'Caveat', 'Comic Sans MS', cursive, sans-serif; font-size: 18px; color: #000099; text-align: left;">
-
                                         <p
                                             style="margin: 0 0 5px; font-size: 24px; font-weight: bold; padding-left: 10px;">
                                             Hi {{user_name}}!</p>
-
                                         <div style="margin-left: 10px; margin-bottom: 15px;">
                                             <p style="margin: 0 0 2px; font-weight: bold;">Order: {{order_id}}</p>
                                             <p style="margin: 0 0 2px; font-weight: bold;">Date: {{friendly_date}}</p>
                                         </div>
-
                                         <table width="100%" style="border-collapse: collapse; font-size: 18px;">
                                             {{items_html}}
                                         </table>
-
                                         <div
                                             style="margin-top: 15px; text-align: right; font-size: 22px; font-weight: bold; margin-right: 10px;">
                                             Total: ₹{{amount}}
                                         </div>
-
                                         <p
                                             style="margin-top: 25px; text-align: center; font-size: 18px; font-weight: bold; padding-right: 20px;">
                                             Thank you for shopping!

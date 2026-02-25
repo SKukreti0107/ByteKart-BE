@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400..700&display=swap');
+    </style>
+</head>
+
+<body style="margin: 0; padding: 0; background-color: #f4f4f4;">
+    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0"
+        style="background-color: #f4f4f4;">
+        <tr>
+            <td align="center" style="padding: 20px 0;">
+                <div
+                    style="width: 100%; max-width: 600px; margin: 0 auto; background-image: url('{{base_api_url}}/public/email_backgrounds/order_shipped.png'); background-size: 100% 100%; background-repeat: no-repeat; background-position: top center; min-height: 850px; position: relative;">
+                    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+                        <tr>
+                            <td align="center" style="padding-top: 300px;">
+                                <div
+                                    style="background-color: rgba(255, 255, 255, 0.9); border: 2px solid #000; padding: 20px; width: 300px; font-family: 'Caveat', cursive, sans-serif; font-size: 20px; color: #000; transform: rotate(1deg);">
+                                    <h2 style="margin-top: 0;">On the way!</h2>
+                                    <p>Hi {{user_name}},</p>
+                                    <p>Your order <strong>{{order_id}}</strong> has been shipped and is heading your
+                                        way!</p>
+                                    <hr style="border: 0; border-top: 1px dashed #000; margin: 15px 0;" />
+                                    <p style="font-size: 16px;">Keep an eye out for it!</p>
+                                </div>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+            </td>
+        </tr>
+    </table>
+</body>
+
+</html>
