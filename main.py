@@ -5,6 +5,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List,Optional
+from fastapi.staticfiles import StaticFiles
 
 from db import init_db, get_session
 from models import Product, Listing, Request,Category,SubCategory,Brand, User, HeroContent, ShoppingCart, Order, OrderStatus, CheckoutDetails
@@ -33,15 +34,15 @@ app.add_middleware(
     allow_origins=[
         "https://byte-kart.vercel.app",
         "http://localhost:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:5500",
-        "http://localhost:5500",
+        "https://bytekart.co.in",
         "null"
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount("/public", StaticFiles(directory="public"), name="public")
 
 @app.get("/")
 def read_root():
@@ -756,6 +757,26 @@ async def get_admin_dashboard_stats(
         "revenue": revenue_sum,
         "pendingRequests": requests_count
     }
+
+# --- Test Email ---
+@app.post("/test-email")
+async def test_email_rendering(email: str = Query(..., description="Email address to send test to")):
+    items = [
+        {"name": "Awesome Product 1", "quantity": 1, "price": 499},
+        {"name": "Cool Gadget B", "quantity": 2, "price": 1000}
+    ]
+    try:
+        await send_order_confirmation_email(
+            user_email=email,
+            user_name="Test User",
+            order_id="TEST-ORD-123456",
+            amount=2499.0,
+            items=items,
+            created_at=datetime.now(timezone.utc).isoformat()
+        )
+        return {"message": f"Test email sent to {email}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

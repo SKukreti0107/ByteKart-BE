@@ -21,65 +21,32 @@ async def send_order_confirmation_email(user_email: str, user_name: str, order_i
         price = item.get("price", 0)
         items_html += f'''
         <tr>
-            <td style="padding: 12px; border-bottom: 1px solid #333; color: #b3b3b3;">{name}</td>
-            <td style="padding: 12px; text-align: center; border-bottom: 1px solid #333; color: #b3b3b3;">x{qty}</td>
-            <td style="padding: 12px; text-align: right; border-bottom: 1px solid #333; color: #b3b3b3;">₹{price}</td>
+            <td style="padding: 4px 0; border-bottom: 2px dashed rgba(0, 0, 153, 0.2); color: #000099; font-weight: bold;">{name}</td>
+            <td style="padding: 4px 0; text-align: center; border-bottom: 2px dashed rgba(0, 0, 153, 0.2); color: #000099; font-weight: bold;">x{qty}</td>
+            <td style="padding: 4px 0; text-align: right; border-bottom: 2px dashed rgba(0, 0, 153, 0.2); color: #000099; font-weight: bold;">₹{price}</td>
         </tr>
         '''
 
-    friendly_date = created_at[:10] if created_at else "Now"
+    friendly_date = str(created_at)[:10] if created_at else "Now"
 
-    html_content = f"""
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #121212; color: #e0e0e0; padding: 20px; border-radius: 12px;">
-        <div style="text-align: center; margin-bottom: 30px;">
-            <h1 style="color: #4a90e2; font-size: 20px; margin: 0; text-transform: uppercase; letter-spacing: 1px;">BYTEKART.IN</h1>
-        </div>
+    # Read the HTML template
+    template_path = os.path.join("public", "email_template", "order.html")
+    try:
+        with open(template_path, "r", encoding="utf-8") as f:
+            template_content = f.read()
+    except Exception as e:
+        print(f"Error reading email template: {e}")
+        # Fallback to a simple message if template is missing
+        template_content = f"Order Confirmation: {order_id}. Total: ₹{amount}"
 
-        <div style="background-color: #1a1a1a; border-radius: 16px; padding: 30px; border: 1px solid #333;">
-            <h2 style="margin-top: 0; font-size: 24px; text-align: center; font-weight: normal;">
-                <span style="background-color: #a69e6b; color: #1a1a1a; padding: 2px 8px; border-radius: 4px; font-weight: bold;">Order</span> Completed!
-            </h2>
-            
-            <p style="text-align: center; line-height: 1.6; color: #b3b3b3; margin-top: 20px; font-size: 15px;">
-                Hello {user_name}! Your <span style="background-color: #a69e6b; color: #1a1a1a; padding: 0 4px; border-radius: 2px;">order</span> with us has been processed and completed successfully.
-            </p>
-
-            <hr style="border: 0; border-top: 1px dashed #333; margin: 30px 0;" />
-
-            <h3 style="margin-top: 0; font-size: 16px; font-weight: normal;">
-                <span style="background-color: #a69e6b; color: #1a1a1a; padding: 2px 6px; border-radius: 4px; font-weight: bold;">Order</span> Details:
-            </h3>
-
-            <div style="margin-bottom: 25px; color: #b3b3b3; font-size: 14px; line-height: 1.8;">
-                <div style="display: flex; justify-content: space-between;">
-                    <span style="width: 100px; display: inline-block;">Id:</span>
-                    <span style="color: #e0e0e0;">{order_id}</span>
-                </div>
-                <div style="display: flex; justify-content: space-between;">
-                    <span style="width: 100px; display: inline-block;">Date:</span>
-                    <span style="color: #e0e0e0;">{friendly_date}</span>
-                </div>
-            </div>
-
-            <table style="width: 100%; border-collapse: collapse; margin-top: 10px; border: 1px solid #333; border-radius: 8px; overflow: hidden; font-size: 14px;">
-                <thead>
-                    <tr style="background-color: #222;">
-                        <th style="padding: 12px; text-align: left; font-weight: 500; color: #e0e0e0; border-bottom: 1px solid #333;">Item</th>
-                        <th style="padding: 12px; text-align: center; font-weight: 500; color: #e0e0e0; border-bottom: 1px solid #333;">Quantity</th>
-                        <th style="padding: 12px; text-align: right; font-weight: 500; color: #e0e0e0; border-bottom: 1px solid #333;">Price</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {items_html}
-                </tbody>
-            </table>
-
-            <div style="text-align: right; margin-top: 20px; font-size: 16px; font-weight: bold; color: #8faadb;">
-                Total: ₹{amount}
-            </div>
-        </div>
-    </div>
-    """
+    # Replace placeholders
+    base_api_url = os.getenv("BASE_API_URL", "https://byte-kart-be.vercel.app")
+    html_content = template_content.replace("{{user_name}}", user_name)
+    html_content = html_content.replace("{{order_id}}", order_id)
+    html_content = html_content.replace("{{friendly_date}}", friendly_date)
+    html_content = html_content.replace("{{items_html}}", items_html)
+    html_content = html_content.replace("{{amount}}", str(amount))
+    html_content = html_content.replace("{{base_api_url}}", base_api_url)
 
     try:
         params :client.Emails.SendParams = {
