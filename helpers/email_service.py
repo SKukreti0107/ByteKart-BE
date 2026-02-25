@@ -19,15 +19,20 @@ async def send_order_confirmation_email(user_email: str, user_name: str, order_i
         name = item.get("name", "Item")
         qty = item.get("quantity", 1)
         price = item.get("price", 0)
+        # Format price to remove .0 if it's a whole number
+        display_price = int(price) if price == int(price) else price
         items_html += f'''
         <tr>
-            <td style="padding: 4px 0; border-bottom: 2px dashed rgba(0, 0, 153, 0.2); color: #000099; font-weight: bold;">{name}</td>
-            <td style="padding: 4px 0; text-align: center; border-bottom: 2px dashed rgba(0, 0, 153, 0.2); color: #000099; font-weight: bold;">x{qty}</td>
-            <td style="padding: 4px 0; text-align: right; border-bottom: 2px dashed rgba(0, 0, 153, 0.2); color: #000099; font-weight: bold;">₹{price}</td>
+            <td style="padding: 6px 0; border-bottom: 1px dashed rgba(0, 0, 153, 0.15); color: #000099; font-weight: bold; line-height: 1.2;">{name}</td>
+            <td style="padding: 6px 0; text-align: center; border-bottom: 1px dashed rgba(0, 0, 153, 0.15); color: #000099; font-weight: bold; width: 40px;">x{qty}</td>
+            <td style="padding: 6px 0; text-align: right; border-bottom: 1px dashed rgba(0, 0, 153, 0.15); color: #000099; font-weight: bold; width: 80px;">₹{display_price}</td>
         </tr>
         '''
 
     friendly_date = str(created_at)[:10] if created_at else "Now"
+    
+    # Format total amount
+    display_amount = int(amount) if amount == int(amount) else amount
 
     # Read the HTML template
     template_path = os.path.join("public", "email_template", "order.html")
@@ -45,7 +50,7 @@ async def send_order_confirmation_email(user_email: str, user_name: str, order_i
     html_content = html_content.replace("{{order_id}}", order_id)
     html_content = html_content.replace("{{friendly_date}}", friendly_date)
     html_content = html_content.replace("{{items_html}}", items_html)
-    html_content = html_content.replace("{{amount}}", str(amount))
+    html_content = html_content.replace("{{amount}}", str(display_amount))
     html_content = html_content.replace("{{base_api_url}}", base_api_url)
 
     try:
