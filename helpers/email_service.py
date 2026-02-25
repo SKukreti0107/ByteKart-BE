@@ -40,7 +40,7 @@ async def send_order_confirmation_email(user_email: str, user_name: str, order_i
         template_content = f"Order Confirmation: {order_id}. Total: ₹{amount}"
 
     # Replace placeholders
-    base_api_url = os.getenv("BASE_API_URL", "https://byte-kart-be.vercel.app")
+    base_api_url = os.getenv("BASE_API_URL", "https://api.bytekart.co.in")
     html_content = template_content.replace("{{user_name}}", user_name)
     html_content = html_content.replace("{{order_id}}", order_id)
     html_content = html_content.replace("{{friendly_date}}", friendly_date)
