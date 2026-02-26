@@ -721,7 +721,8 @@ async def admin_update_order_status(
                 user_name=user.name or "Customer",
                 order_id=str(order.id),
                 new_status=order.status.value,
-                amount=order.total_amount
+                amount=order.total_amount,
+                items=order.items
             )
         except Exception as e:
             logging.error(f"Failed to send order status update email: {e}")
