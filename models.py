@@ -30,6 +30,8 @@ class Listing(SQLModel, table=True):
     stock_status: StockStatus
     description: Optional[str] = None
     image_url: str | None = None
+    image_urls: Optional[List[str]] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: Optional[str] = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(), index=True)
 
 class User(SQLModel, table=True):
     __table_args__ = {"schema": "neon_auth"}
@@ -103,3 +105,10 @@ class CheckoutDetails(SQLModel, table=True):
     address: Optional[str] = None
     city: Optional[str] = None
     pincode: Optional[str] = None
+
+class GlobalNotice(SQLModel, table=True):
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    message: str
+    type: str = Field(default="info")  # 'info', 'warning', 'promo', 'urgent'
+    is_active: bool = Field(default=True)
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())

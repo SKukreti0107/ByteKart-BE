@@ -8,7 +8,7 @@ from typing import List,Optional
 from fastapi.staticfiles import StaticFiles
 
 from db import init_db, get_session
-from models import Product, Listing, Request,Category,SubCategory,Brand, User, HeroContent, ShoppingCart, Order, OrderStatus, CheckoutDetails
+from models import Product, Listing, Request,Category,SubCategory,Brand, User, HeroContent, ShoppingCart, Order, OrderStatus, CheckoutDetails, GlobalNotice
 from auth import get_current_user, admin_only, get_db_user
 from datetime import datetime, timezone
 
@@ -73,8 +73,10 @@ async def get_active_hero(session: AsyncSession = Depends(get_session)):
         return valid_hero
         
     # Fallback to 'newest' behavior: return the top 5 newest listings
-    # Since we don't have a created_at field explicitly in Listing, we'll just fetch them reverse order or limit 5
-    result = await session.execute(select(Listing).limit(5)) # In a real scenario, order_by(Listing.created_at.desc())
+    from sqlalchemy import nulls_last, desc
+    result = await session.execute(
+        select(Listing).order_by(nulls_last(desc(Listing.created_at))).limit(5)
+    )
     newest_listings = result.scalars().all()
     
     return {
@@ -97,7 +99,7 @@ async def list_listings(
     subCategory_id: Optional[str] = Query(None),
     brand_id: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
-    limit: int = Query(40, le=100),
+    limit: int = Query(100, le=200),
     offset: int = Query(0, ge=0)
     ):
     response.headers["Cache-Control"] = "public, max-age=300"
@@ -111,6 +113,10 @@ async def list_listings(
     if search:
         stmt = stmt.where(Listing.name.ilike(f"%{search}%"))
     
+    # Always order newest first; NULLS LAST handles existing rows without created_at
+    from sqlalchemy import nulls_last, desc
+    stmt = stmt.order_by(nulls_last(desc(Listing.created_at)))
+
     # Appending Limit and Offset
     stmt = stmt.offset(offset).limit(limit)
     
@@ -779,6 +785,79 @@ async def test_email_rendering(email: str = Query(..., description="Email addres
         return {"message": f"Test email sent to {email}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- Global Notice ---
+
+@app.get("/notice")
+async def get_active_notice(response: Response, session: AsyncSession = Depends(get_session)):
+    response.headers["Cache-Control"] = "public, max-age=60"
+    result = await session.execute(select(GlobalNotice).where(GlobalNotice.is_active == True).limit(1))
+    notice = result.scalars().first()
+    if not notice:
+        return None
+    return notice
+
+@app.get("/admin/notice")
+async def get_all_notices(
+    current_user: User = Depends(admin_only),
+    session: AsyncSession = Depends(get_session)
+):
+    result = await session.execute(select(GlobalNotice).order_by(GlobalNotice.created_at.desc()))
+    notices = result.scalars().all()
+    return notices
+
+@app.post("/admin/notice")
+async def create_notice(
+    notice_data: GlobalNotice,
+    current_user: User = Depends(admin_only),
+    session: AsyncSession = Depends(get_session)
+):
+    # Deactivate all existing notices
+    existing = await session.execute(select(GlobalNotice).where(GlobalNotice.is_active == True))
+    for n in existing.scalars().all():
+        n.is_active = False
+        session.add(n)
+    
+    session.add(notice_data)
+    await session.commit()
+    await session.refresh(notice_data)
+    return notice_data
+
+@app.put("/admin/notice/{notice_id}")
+async def update_notice(
+    notice_id: str,
+    notice_data: dict,
+    current_user: User = Depends(admin_only),
+    session: AsyncSession = Depends(get_session)
+):
+    result = await session.execute(select(GlobalNotice).where(GlobalNotice.id == notice_id))
+    notice = result.scalars().first()
+    if not notice:
+        raise HTTPException(status_code=404, detail="Notice not found")
+    
+    for key, value in notice_data.items():
+        if hasattr(notice, key) and key != "id":
+            setattr(notice, key, value)
+    
+    session.add(notice)
+    await session.commit()
+    await session.refresh(notice)
+    return notice
+
+@app.delete("/admin/notice/{notice_id}")
+async def delete_notice(
+    notice_id: str,
+    current_user: User = Depends(admin_only),
+    session: AsyncSession = Depends(get_session)
+):
+    result = await session.execute(select(GlobalNotice).where(GlobalNotice.id == notice_id))
+    notice = result.scalars().first()
+    if not notice:
+        raise HTTPException(status_code=404, detail="Notice not found")
+    
+    await session.delete(notice)
+    await session.commit()
+    return {"message": "Notice deleted"}
 
 if __name__ == "__main__":
     import uvicorn
