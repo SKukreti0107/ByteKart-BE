@@ -8,12 +8,12 @@ from typing import List,Optional
 from fastapi.staticfiles import StaticFiles
 
 from db import init_db, get_session
-from models import Product, Listing, Request,Category,SubCategory,Brand, User, HeroContent, ShoppingCart, Order, OrderStatus, CheckoutDetails, GlobalNotice
+from models import Product, Listing, Request,Category,SubCategory,Brand, User, HeroContent, ShoppingCart, Order, OrderStatus, CheckoutDetails, GlobalNotice, ReturnRequest, ReturnStatus
 from auth import get_current_user, admin_only, get_db_user
 from datetime import datetime, timezone
 
 from helpers.verify_payment_sig import get_razorpay_client, verify_payment as verify_razorpay_payment
-from helpers.email_service import send_order_confirmation_email, send_order_status_update_email, send_email_to_admin
+from helpers.email_service import send_order_confirmation_email, send_order_status_update_email, send_email_to_admin, send_return_status_email
 
 import logging
 
@@ -423,6 +423,85 @@ async def get_razorpay_config():
     import os
     return {"key_id": os.getenv("RAZOR_PAY_KEY_ID")}
 
+# --- Return Routes ---
+
+class ReturnRequestData(BaseModel):
+    reason: str
+
+class ReturnStatusUpdate(BaseModel):
+    status: ReturnStatus
+
+@app.post("/orders/{id}/return")
+async def initiate_return(
+    id: str,
+    body: ReturnRequestData,
+    current_user: User = Depends(get_db_user),
+    session: AsyncSession = Depends(get_session)
+):
+    result = await session.execute(
+        select(Order).where(Order.id == id, Order.user_id == current_user.id)
+    )
+    order = result.scalars().first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if order.status != OrderStatus.DELIVERED:
+        raise HTTPException(status_code=400, detail="Only delivered orders can be returned")
+
+    # Check 7-day window
+    order_date = datetime.fromisoformat(order.created_at).replace(tzinfo=timezone.utc)
+    days_since = (datetime.now(timezone.utc) - order_date).days
+    if days_since > 7:
+        raise HTTPException(status_code=400, detail="Return window has expired (7 days from order date)")
+
+    # Check if a return request already exists
+    existing = await session.execute(
+        select(ReturnRequest).where(ReturnRequest.order_id == id)
+    )
+    if existing.scalars().first():
+        raise HTTPException(status_code=400, detail="A return request for this order already exists")
+
+    return_req = ReturnRequest(
+        order_id=id,
+        user_id=current_user.id,
+        reason=body.reason,
+    )
+    session.add(return_req)
+    order.status = OrderStatus.RETURN_REQUESTED
+    session.add(order)
+
+    try:
+        await session.commit()
+        await session.refresh(return_req)
+    except Exception as e:
+        await session.rollback()
+        logging.error(f"Error saving return request: {e}")
+        raise HTTPException(status_code=500, detail="Could not save return request")
+
+    try:
+        await send_email_to_admin(
+            "return_request",
+            f"Return Request for Order {id}",
+            f"Customer {current_user.name or current_user.email} has requested a return for order {id}.\nReason: {body.reason}"
+        )
+    except Exception as e:
+        logging.error(f"Failed to send return request admin email: {e}")
+
+    # Send return confirmation email to customer
+    try:
+        await send_return_status_email(
+            user_email=current_user.email,
+            user_name=current_user.name or "Customer",
+            order_id=str(order.id),
+            return_status="return_requested",
+            amount=order.total_amount,
+            items=order.items
+        )
+    except Exception as e:
+        logging.error(f"Failed to send return confirmation email: {e}")
+
+    return {"message": "Return request submitted successfully", "return_request_id": return_req.id}
+
 # --- Admin Routes ---
 
 @app.get("/admin/listings", response_model=List[Listing])
@@ -734,6 +813,92 @@ async def admin_update_order_status(
             logging.error(f"Failed to send order status update email: {e}")
 
     return order
+
+# --- Admin Routes: Returns ---
+
+@app.get("/admin/returns")
+async def admin_get_all_returns(
+    current_user: User = Depends(admin_only),
+    session: AsyncSession = Depends(get_session)
+):
+    result = await session.execute(
+        select(ReturnRequest).order_by(ReturnRequest.created_at.desc())
+    )
+    return_requests = result.scalars().all()
+
+    enriched = []
+    for rr in return_requests:
+        order_result = await session.execute(select(Order).where(Order.id == rr.order_id))
+        order = order_result.scalars().first()
+        user_result = await session.execute(select(User).where(User.id == rr.user_id))
+        user = user_result.scalars().first()
+        enriched.append({
+            "id": rr.id,
+            "order_id": rr.order_id,
+            "reason": rr.reason,
+            "status": rr.status,
+            "created_at": rr.created_at,
+            "user_name": user.name if user else None,
+            "user_email": user.email if user else None,
+            "total_amount": order.total_amount if order else None,
+            "order_items": order.items if order else [],
+        })
+    return enriched
+
+@app.put("/admin/returns/{id}/status")
+async def admin_update_return_status(
+    id: str,
+    update_data: ReturnStatusUpdate,
+    current_user: User = Depends(admin_only),
+    session: AsyncSession = Depends(get_session)
+):
+    result = await session.execute(select(ReturnRequest).where(ReturnRequest.id == id))
+    return_req = result.scalars().first()
+    if not return_req:
+        raise HTTPException(status_code=404, detail="Return request not found")
+
+    return_req.status = update_data.status
+    session.add(return_req)
+
+    # Update the linked order status accordingly
+    order_result = await session.execute(select(Order).where(Order.id == return_req.order_id))
+    order = order_result.scalars().first()
+    if order:
+        if update_data.status == ReturnStatus.APPROVED:
+            order.status = OrderStatus.RETURNED
+        elif update_data.status == ReturnStatus.REJECTED:
+            order.status = OrderStatus.DELIVERED
+        session.add(order)
+
+    try:
+        await session.commit()
+        await session.refresh(return_req)
+    except Exception as e:
+        await session.rollback()
+        logging.error(f"Error updating return status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update return status")
+
+    # Notify customer by email using the return-specific template
+    user_result = await session.execute(select(User).where(User.id == return_req.user_id))
+    user = user_result.scalars().first()
+    if user and order:
+        try:
+            # Map the return decision to the right email status
+            email_status = "returned" if update_data.status == ReturnStatus.APPROVED else "rejected"
+            await send_return_status_email(
+                user_email=user.email,
+                user_name=user.name or "Customer",
+                order_id=str(order.id),
+                return_status=email_status,
+                amount=order.total_amount,
+                items=order.items
+            )
+        except Exception as e:
+            logging.error(f"Failed to send return status email: {e}")
+
+    return return_req
+
+
 
 # --- Admin Dashboard Stats ---
 @app.get("/admin/dashboard-stats")

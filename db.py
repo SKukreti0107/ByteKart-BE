@@ -11,7 +11,15 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable not set")
 
-engine = create_async_engine(DATABASE_URL, echo=True)
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=True,
+    pool_pre_ping=True,
+    connect_args={
+        "prepared_statement_cache_size": 0,
+        "statement_cache_size": 0,
+    },
+)
 
 async_session_maker = sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False

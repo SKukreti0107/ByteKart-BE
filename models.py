@@ -1,5 +1,5 @@
 from sqlmodel import SQLModel, Field, JSON
-from sqlalchemy import Column
+from sqlalchemy import Column, String
 from uuid import uuid4, UUID
 from typing import Optional, Dict, Any,List
 from enum import Enum
@@ -86,6 +86,13 @@ class OrderStatus(str, Enum):
     FAILED = "failed"
     SHIPPED = "shipped"
     DELIVERED = "delivered"
+    RETURN_REQUESTED = "return_requested"
+    RETURNED = "returned"
+
+class ReturnStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
 
 class Order(SQLModel, table=True):
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
@@ -96,7 +103,15 @@ class Order(SQLModel, table=True):
     shipping_address: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     shipping_fee: float = Field(default=0.0)
     total_amount: float
-    status: OrderStatus = Field(default=OrderStatus.PENDING, index=True)
+    status: OrderStatus = Field(default=OrderStatus.PENDING, sa_column=Column(String, default=OrderStatus.PENDING.value, index=True))
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class ReturnRequest(SQLModel, table=True):
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    order_id: str = Field(foreign_key="order.id", index=True)
+    user_id: UUID = Field(foreign_key="neon_auth.user.id", index=True)
+    reason: str
+    status: ReturnStatus = Field(default=ReturnStatus.PENDING, sa_column=Column(String, default=ReturnStatus.PENDING.value, index=True))
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class CheckoutDetails(SQLModel, table=True):

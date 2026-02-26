@@ -224,17 +224,126 @@ async def send_thanks_after_delivery_email(user_email: str, user_name: str, orde
         print(f"Failed to send thanks email: {e}")
 
 
+async def send_return_status_email(user_email: str, user_name: str, order_id: str, return_status: str, amount: float = 0, items: list = []):
+    """Send return-specific email using the return_status.html template."""
+    client = get_resend_client()
+    if not client:
+        return
+
+    # Generate ITEM_LIST
+    item_list_html = '<table border="0" cellpadding="0" cellspacing="0" width="100%" style="font-family: \'Public Sans\', sans-serif; font-size: 14px; color: #000000;">'
+    for item in items:
+        name = item.get("name", "Item")
+        qty = item.get("quantity", 1)
+        price = item.get("price", 0)
+        display_price = int(price) if price == int(price) else price
+        item_list_html += f"""
+            <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #eeeeee;">{name} <span style="color: #666666;">x{qty}</span></td>
+                <td align="right" style="padding: 8px 0; border-bottom: 1px solid #eeeeee; font-weight: bold;">₹{display_price}</td>
+            </tr>
+        """
+    if not items:
+        item_list_html += "<tr><td colspan='2' style='padding: 8px 0;'>Order details are being processed.</td></tr>"
+    item_list_html += "</table>"
+
+    display_amount = int(amount) if amount == int(amount) else amount
+
+    # Status configurations for the return template
+    status_configs = {
+        "return_requested": {
+            "hero_title": "Return<br/>Initiated",
+            "hero_color": "#D97706",
+            "status_title": "We've received your return request",
+            "status_desc": "Our team is reviewing your return request. You'll receive an update once it's been processed. This usually takes 1-2 business days.",
+            "step1_bg": "#5A8A5D", "step1_icon_color": "#ffffff", "step1_icon": "✓",
+            "step2_bg": "#D97706", "step2_icon_color": "#ffffff", "step2_icon": "⟳",
+            "step3_bg": "#ffffff", "step3_icon_color": "#000000", "step3_icon": "•",
+            "step3_opacity": "0.4", "step3_label": "Decision",
+            "subject_prefix": "Return Request Received"
+        },
+        "returned": {
+            "hero_title": "Return<br/>Approved",
+            "hero_color": "#5A8A5D",
+            "status_title": "Your return has been approved",
+            "status_desc": "Great news! Your return request has been approved. The refund will be processed to your original payment method within 5-7 business days.",
+            "step1_bg": "#5A8A5D", "step1_icon_color": "#ffffff", "step1_icon": "✓",
+            "step2_bg": "#5A8A5D", "step2_icon_color": "#ffffff", "step2_icon": "✓",
+            "step3_bg": "#5A8A5D", "step3_icon_color": "#ffffff", "step3_icon": "✓",
+            "step3_opacity": "1.0", "step3_label": "Approved",
+            "subject_prefix": "Return Approved"
+        },
+        "rejected": {
+            "hero_title": "Return<br/>Declined",
+            "hero_color": "#DC2626",
+            "status_title": "Your return request was declined",
+            "status_desc": "Unfortunately, your return request could not be approved. If you have questions, please contact our support team at support@bytekart.co.in.",
+            "step1_bg": "#5A8A5D", "step1_icon_color": "#ffffff", "step1_icon": "✓",
+            "step2_bg": "#5A8A5D", "step2_icon_color": "#ffffff", "step2_icon": "✓",
+            "step3_bg": "#DC2626", "step3_icon_color": "#ffffff", "step3_icon": "✕",
+            "step3_opacity": "1.0", "step3_label": "Declined",
+            "subject_prefix": "Return Declined"
+        }
+    }
+
+    config = status_configs.get(return_status.lower(), status_configs["return_requested"])
+
+    # Load return template
+    template_path = os.path.join("public", "email_template", "return_status.html")
+    if os.path.exists(template_path):
+        with open(template_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+
+        html_content = html_content.replace("{{HERO_TITLE}}", config["hero_title"])
+        html_content = html_content.replace("{{HERO_COLOR}}", config["hero_color"])
+        html_content = html_content.replace("{{STATUS_TITLE}}", config["status_title"])
+        html_content = html_content.replace("{{STATUS_DESC}}", config["status_desc"])
+        html_content = html_content.replace("{{STEP1_BG}}", config["step1_bg"])
+        html_content = html_content.replace("{{STEP1_ICON_COLOR}}", config["step1_icon_color"])
+        html_content = html_content.replace("{{STEP1_ICON}}", config["step1_icon"])
+        html_content = html_content.replace("{{STEP2_BG}}", config["step2_bg"])
+        html_content = html_content.replace("{{STEP2_ICON_COLOR}}", config["step2_icon_color"])
+        html_content = html_content.replace("{{STEP2_ICON}}", config["step2_icon"])
+        html_content = html_content.replace("{{STEP3_BG}}", config["step3_bg"])
+        html_content = html_content.replace("{{STEP3_ICON_COLOR}}", config["step3_icon_color"])
+        html_content = html_content.replace("{{STEP3_ICON}}", config["step3_icon"])
+        html_content = html_content.replace("{{STEP3_OPACITY}}", config["step3_opacity"])
+        html_content = html_content.replace("{{STEP3_LABEL}}", config["step3_label"])
+        html_content = html_content.replace("{{ORDER_ID}}", order_id)
+        html_content = html_content.replace("{{ITEM_LIST}}", item_list_html)
+        html_content = html_content.replace("{{TOTAL_AMOUNT}}", str(display_amount))
+    else:
+        html_content = f"<h1>Return {return_status}</h1><p>Hi {user_name}, your return for order {order_id} is now: {return_status}.</p>{item_list_html}"
+
+    try:
+        params: client.Emails.SendParams = {
+            "from": "ByteKart <orders@mg.bytekart.co.in>",
+            "to": [user_email],
+            "subject": f"ByteKart: {config['subject_prefix']} - {order_id}",
+            "html": html_content
+        }
+        email: client.Emails.SendResponse = client.Emails.send(params)
+        print(f"Return status email sent to {user_email}")
+        return email
+    except Exception as e:
+        print(f"Failed to send return status email: {e}")
+
+
 async def send_email_to_admin(action:str ,subject: str, body: str):
     client = get_resend_client()
     if not client:
         return
 
+    import time 
+    time.sleep(5)
     try:
         admin_emails = ["shubhamkukreti.0107@gmail.com","nathansaul20@gmail.com"]
         if action == "new_order":
             subject = "New Order Received - " + subject
         elif action == "order_cancellation":
             subject = "Order Cancellation - " + subject
+        elif action == "return_request":
+            subject = "Return Request - " + subject
         
         for email in admin_emails:
             params:client.Emails.SendParams = {
