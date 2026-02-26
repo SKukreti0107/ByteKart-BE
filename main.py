@@ -8,12 +8,12 @@ from typing import List,Optional
 from fastapi.staticfiles import StaticFiles
 
 from db import init_db, get_session
-from models import Product, Listing, Request,Category,SubCategory,Brand, User, HeroContent, ShoppingCart, Order, OrderStatus, CheckoutDetails, GlobalNotice, ReturnRequest, ReturnStatus
+from models import Product, Listing, Request,Category,SubCategory,Brand, User, HeroContent, ShoppingCart, Order, OrderStatus, CheckoutDetails, GlobalNotice, ReturnRequest, ReturnStatus, SupportTicket, SupportTicketStatus
 from auth import get_current_user, admin_only, get_db_user
 from datetime import datetime, timezone
 
 from helpers.verify_payment_sig import get_razorpay_client, verify_payment as verify_razorpay_payment
-from helpers.email_service import send_order_confirmation_email, send_order_status_update_email, send_email_to_admin, send_return_status_email
+from helpers.email_service import send_order_confirmation_email, send_order_status_update_email, send_email_to_admin, send_return_status_email, send_support_acknowledgement_email, send_support_reply_email
 
 import logging
 
@@ -924,11 +924,17 @@ async def get_admin_dashboard_stats(
     # Pending Requests
     requests_count = (await session.execute(select(func.count(Request.id)))).scalar() or 0
     
+    # Open Support Tickets
+    open_tickets = (await session.execute(
+        select(func.count(SupportTicket.id)).where(SupportTicket.status == SupportTicketStatus.OPEN)
+    )).scalar() or 0
+    
     return {
         "totalProducts": products_count,
         "totalOrders": orders_count,
         "revenue": revenue_sum,
-        "pendingRequests": requests_count
+        "pendingRequests": requests_count,
+        "openTickets": open_tickets
     }
 
 # --- Test Email ---
@@ -1027,3 +1033,187 @@ async def delete_notice(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+# --- Support Ticket Routes ---
+
+class SupportTicketData(BaseModel):
+    name: str
+    email: str
+    subject: str
+    message: str
+
+class SupportReplyData(BaseModel):
+    reply: str
+
+@app.post("/support/ticket")
+async def create_support_ticket(
+    ticket_data: SupportTicketData,
+    session: AsyncSession = Depends(get_session)
+):
+    ticket = SupportTicket(
+        user_email=ticket_data.email,
+        user_name=ticket_data.name,
+        subject=ticket_data.subject,
+        message=ticket_data.message,
+    )
+    session.add(ticket)
+    try:
+        await session.commit()
+        await session.refresh(ticket)
+    except Exception as e:
+        await session.rollback()
+        logging.error(f"Error saving support ticket: {e}")
+        raise HTTPException(status_code=500, detail="Could not save support ticket")
+
+    # Send acknowledgement to customer
+    try:
+        await send_support_acknowledgement_email(
+            user_email=ticket.user_email,
+            user_name=ticket.user_name,
+            subject=ticket.subject,
+            ticket_id=ticket.id
+        )
+    except Exception as e:
+        logging.error(f"Failed to send support acknowledgement email: {e}")
+
+    # Notify admins
+    try:
+        await send_email_to_admin(
+            "support_ticket",
+            ticket.subject,
+            f"From: {ticket.user_name} ({ticket.user_email})\n\n{ticket.message}"
+        )
+    except Exception as e:
+        logging.error(f"Failed to send support ticket admin notification: {e}")
+
+    return {"message": "Support ticket submitted successfully", "ticket_id": ticket.id}
+
+
+@app.get("/admin/support")
+async def admin_get_all_tickets(
+    current_user: User = Depends(admin_only),
+    session: AsyncSession = Depends(get_session)
+):
+    result = await session.execute(
+        select(SupportTicket).order_by(SupportTicket.created_at.desc())
+    )
+    return result.scalars().all()
+
+
+@app.put("/admin/support/{id}/reply")
+async def admin_reply_ticket(
+    id: str,
+    reply_data: SupportReplyData,
+    current_user: User = Depends(admin_only),
+    session: AsyncSession = Depends(get_session)
+):
+    result = await session.execute(select(SupportTicket).where(SupportTicket.id == id))
+    ticket = result.scalars().first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Support ticket not found")
+
+    ticket.admin_reply = reply_data.reply
+    ticket.status = SupportTicketStatus.REPLIED
+    ticket.replied_at = datetime.now(timezone.utc).isoformat()
+    session.add(ticket)
+
+    try:
+        await session.commit()
+        await session.refresh(ticket)
+    except Exception as e:
+        await session.rollback()
+        logging.error(f"Error updating support ticket: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save reply")
+
+    # Send reply email to customer
+    try:
+        await send_support_reply_email(
+            user_email=ticket.user_email,
+            user_name=ticket.user_name,
+            original_subject=ticket.subject,
+            admin_reply=reply_data.reply,
+            ticket_id=ticket.id
+        )
+    except Exception as e:
+        logging.error(f"Failed to send support reply email: {e}")
+
+    return ticket
+
+
+@app.put("/admin/support/{id}/close")
+async def admin_close_ticket(
+    id: str,
+    current_user: User = Depends(admin_only),
+    session: AsyncSession = Depends(get_session)
+):
+    result = await session.execute(select(SupportTicket).where(SupportTicket.id == id))
+    ticket = result.scalars().first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Support ticket not found")
+
+    ticket.status = SupportTicketStatus.CLOSED
+    session.add(ticket)
+
+    try:
+        await session.commit()
+        await session.refresh(ticket)
+    except Exception as e:
+        await session.rollback()
+        logging.error(f"Error closing support ticket: {e}")
+        raise HTTPException(status_code=500, detail="Failed to close ticket")
+
+    return ticket
+
+
+# --- Resend Webhook (Inbound Email) ---
+
+from fastapi import Request as FastAPIRequest
+
+@app.post("/webhooks/resend")
+async def resend_webhook(
+    request: FastAPIRequest,
+    session: AsyncSession = Depends(get_session)
+):
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    event_type = payload.get("type", "")
+
+    if event_type == "email.received":
+        data = payload.get("data", {})
+        from_email = data.get("from", "unknown@unknown.com")
+        subject = data.get("subject", "No Subject")
+        body = data.get("text", data.get("html", ""))
+        # Extract name from email format "Name <email>" or use email
+        sender_name = from_email.split("<")[0].strip() if "<" in from_email else from_email.split("@")[0]
+        sender_email = from_email.split("<")[1].rstrip(">") if "<" in from_email else from_email
+
+        ticket = SupportTicket(
+            user_email=sender_email,
+            user_name=sender_name or "Customer",
+            subject=subject,
+            message=body[:5000],  # Cap message length
+        )
+        session.add(ticket)
+        try:
+            await session.commit()
+            await session.refresh(ticket)
+            logging.info(f"Inbound email ticket created: {ticket.id} from {sender_email}")
+        except Exception as e:
+            await session.rollback()
+            logging.error(f"Error saving inbound email ticket: {e}")
+            raise HTTPException(status_code=500, detail="Failed to process inbound email")
+
+        # Notify admins
+        try:
+            await send_email_to_admin(
+                "support_ticket",
+                subject,
+                f"Inbound email from: {sender_name} ({sender_email})\n\n{body[:1000]}"
+            )
+        except Exception as e:
+            logging.error(f"Failed to notify admins of inbound email: {e}")
+
+    return {"status": "ok"}

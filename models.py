@@ -127,3 +127,19 @@ class GlobalNotice(SQLModel, table=True):
     type: str = Field(default="info")  # 'info', 'warning', 'promo', 'urgent'
     is_active: bool = Field(default=True)
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class SupportTicketStatus(str, Enum):
+    OPEN = "open"
+    REPLIED = "replied"
+    CLOSED = "closed"
+
+class SupportTicket(SQLModel, table=True):
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    user_email: str
+    user_name: str
+    subject: str
+    message: str
+    admin_reply: Optional[str] = None
+    status: SupportTicketStatus = Field(default=SupportTicketStatus.OPEN, sa_column=Column(String, default=SupportTicketStatus.OPEN.value, index=True))
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    replied_at: Optional[str] = None

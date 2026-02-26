@@ -344,6 +344,8 @@ async def send_email_to_admin(action:str ,subject: str, body: str):
             subject = "Order Cancellation - " + subject
         elif action == "return_request":
             subject = "Return Request - " + subject
+        elif action == "support_ticket":
+            subject = "New Support Ticket - " + subject
         
         for email in admin_emails:
             params:client.Emails.SendParams = {
@@ -356,3 +358,102 @@ async def send_email_to_admin(action:str ,subject: str, body: str):
             print(f"Email sent to admin: {subject}")
     except Exception as e:
         print(f"Failed to send email to admin: {e}")
+
+
+async def send_support_acknowledgement_email(user_email: str, user_name: str, subject: str, ticket_id: str):
+    """Send acknowledgement email to customer when they submit a support ticket."""
+    client = get_resend_client()
+    if not client:
+        return
+
+    html_content = f"""
+    <div style="font-family: 'Inter', 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff;">
+        <div style="background: #000000; padding: 32px; text-align: center;">
+            <h1 style="color: #C6DCBA; font-size: 28px; margin: 0; letter-spacing: 4px; text-transform: uppercase;">BYTEKART</h1>
+            <p style="color: #ffffff; font-size: 12px; letter-spacing: 3px; text-transform: uppercase; margin-top: 8px;">Support</p>
+        </div>
+        <div style="padding: 40px 32px; border: 4px solid #000000; border-top: 0;">
+            <h2 style="font-size: 22px; font-weight: 900; text-transform: uppercase; margin: 0 0 16px 0; letter-spacing: 1px;">We've Got Your Message</h2>
+            <p style="font-size: 14px; color: #333333; line-height: 1.6; margin: 0 0 24px 0;">
+                Hi <strong>{user_name}</strong>, thanks for reaching out! We've received your support request and our team will get back to you as soon as possible.
+            </p>
+            <div style="background: #f5f5f5; border: 3px solid #000000; padding: 20px; margin: 0 0 24px 0;">
+                <p style="font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: #666; margin: 0 0 8px 0;"><strong>Ticket ID</strong></p>
+                <p style="font-size: 16px; font-weight: bold; margin: 0 0 16px 0; font-family: monospace;">{ticket_id[:8]}</p>
+                <p style="font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: #666; margin: 0 0 8px 0;"><strong>Subject</strong></p>
+                <p style="font-size: 14px; margin: 0;">{subject}</p>
+            </div>
+            <p style="font-size: 13px; color: #666666; line-height: 1.6; margin: 0;">
+                We typically respond within 24 hours. If your issue is urgent, please mention it in a follow-up email to <strong>support@mg.bytekart.co.in</strong>.
+            </p>
+        </div>
+        <div style="background: #000000; padding: 20px; text-align: center;">
+            <p style="color: #666666; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; margin: 0;">© 2026 ByteKart — Greater Noida, India</p>
+        </div>
+    </div>
+    """
+
+    try:
+        params: client.Emails.SendParams = {
+            "from": "ByteKart Support <support@mg.bytekart.co.in>",
+            "to": [user_email],
+            "subject": f"ByteKart Support: We've received your request — {subject}",
+            "html": html_content
+        }
+        email: client.Emails.SendResponse = client.Emails.send(params)
+        print(f"Support acknowledgement email sent to {user_email}")
+        return email
+    except Exception as e:
+        print(f"Failed to send support acknowledgement email: {e}")
+
+
+async def send_support_reply_email(user_email: str, user_name: str, original_subject: str, admin_reply: str, ticket_id: str):
+    """Send admin's reply to a support ticket to the customer."""
+    client = get_resend_client()
+    if not client:
+        return
+
+    # Convert newlines to <br> for HTML display
+    reply_html = admin_reply.replace("\n", "<br>")
+
+    html_content = f"""
+    <div style="font-family: 'Inter', 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff;">
+        <div style="background: #000000; padding: 32px; text-align: center;">
+            <h1 style="color: #C6DCBA; font-size: 28px; margin: 0; letter-spacing: 4px; text-transform: uppercase;">BYTEKART</h1>
+            <p style="color: #ffffff; font-size: 12px; letter-spacing: 3px; text-transform: uppercase; margin-top: 8px;">Support</p>
+        </div>
+        <div style="padding: 40px 32px; border: 4px solid #000000; border-top: 0;">
+            <h2 style="font-size: 22px; font-weight: 900; text-transform: uppercase; margin: 0 0 16px 0; letter-spacing: 1px;">We've Replied</h2>
+            <p style="font-size: 14px; color: #333333; line-height: 1.6; margin: 0 0 24px 0;">
+                Hi <strong>{user_name}</strong>, our support team has responded to your ticket.
+            </p>
+            <div style="background: #f5f5f5; border: 3px solid #000000; padding: 20px; margin: 0 0 16px 0;">
+                <p style="font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: #666; margin: 0 0 8px 0;"><strong>Ticket</strong></p>
+                <p style="font-size: 14px; font-weight: bold; margin: 0;">{original_subject}</p>
+            </div>
+            <div style="background: #C6DCBA; border: 3px solid #000000; padding: 20px; margin: 0 0 24px 0;">
+                <p style="font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: #333; margin: 0 0 12px 0;"><strong>Our Response</strong></p>
+                <p style="font-size: 14px; color: #000000; line-height: 1.7; margin: 0;">{reply_html}</p>
+            </div>
+            <p style="font-size: 13px; color: #666666; line-height: 1.6; margin: 0;">
+                If you need further assistance, simply reply to this email or write to <strong>support@mg.bytekart.co.in</strong>.
+            </p>
+        </div>
+        <div style="background: #000000; padding: 20px; text-align: center;">
+            <p style="color: #666666; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; margin: 0;">© 2026 ByteKart — Greater Noida, India</p>
+        </div>
+    </div>
+    """
+
+    try:
+        params: client.Emails.SendParams = {
+            "from": "ByteKart Support <support@mg.bytekart.co.in>",
+            "to": [user_email],
+            "subject": f"Re: {original_subject} — ByteKart Support",
+            "html": html_content
+        }
+        email: client.Emails.SendResponse = client.Emails.send(params)
+        print(f"Support reply email sent to {user_email}")
+        return email
+    except Exception as e:
+        print(f"Failed to send support reply email: {e}")
