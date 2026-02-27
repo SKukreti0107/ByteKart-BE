@@ -316,20 +316,28 @@ async def admin_update_order_status(
         logging.error(f"Database error updating order status: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update order status.")
 
-    user_result = await session.execute(select(User).where(User.id == order.user_id))
-    user = user_result.scalars().first()
-    if user:
-        try:
-            await send_order_status_update_email(
-                user_email=user.email,
-                user_name=user.name or "Customer",
-                order_id=str(order.id),
-                new_status=order.status.value,
-                amount=order.total_amount,
-                items=order.items
-            )
-        except Exception as e:
-            logging.error(f"Failed to send order status update email: {e}")
+    # Only notify the customer for shipped/delivered — return statuses are
+    # handled by the dedicated returns flow (send_return_status_email).
+    NOTIFIABLE_STATUSES = {OrderStatus.SHIPPED, OrderStatus.DELIVERED}
+    if update_data.status in NOTIFIABLE_STATUSES:
+        user_result = await session.execute(select(User).where(User.id == order.user_id))
+        user = user_result.scalars().first()
+        if user:
+            try:
+                # Use update_data.status.value (guaranteed enum) instead of
+                # order.status.value — after session.refresh(), the Column(String)
+                # column returns a plain str, so .value raises AttributeError and
+                # the email was silently swallowed by the except block.
+                await send_order_status_update_email(
+                    user_email=user.email,
+                    user_name=user.name or "Customer",
+                    order_id=str(order.id),
+                    new_status=update_data.status.value,
+                    amount=order.total_amount,
+                    items=order.items
+                )
+            except Exception as e:
+                logging.error(f"Failed to send order status update email: {e}")
 
     return order
 
