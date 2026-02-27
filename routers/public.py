@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import nulls_last, desc
+from sqlalchemy import nulls_last, desc, func
 from typing import List, Optional
 from datetime import datetime, timezone
 
@@ -44,7 +44,7 @@ async def list_products(response: Response, session: AsyncSession = Depends(get_
     return result.scalars().all()
 
 
-@router.get("/listings", response_model=List[Listing])
+@router.get("/listings")
 async def list_listings(
     response: Response,
     session: AsyncSession = Depends(get_session),
@@ -53,22 +53,27 @@ async def list_listings(
     brand_id: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     limit: int = Query(100, le=200),
-    offset: int = Query(0, ge=0)
+    skip: int = Query(0, ge=0)
 ):
     response.headers["Cache-Control"] = "public, max-age=300"
-    stmt = select(Listing)
+    base = select(Listing)
     if category_id:
-        stmt = stmt.where(Listing.category_id == category_id)
+        base = base.where(Listing.category_id == category_id)
     if subCategory_id:
-        stmt = stmt.where(Listing.subcategory_id == subCategory_id)
+        base = base.where(Listing.subcategory_id == subCategory_id)
     if brand_id:
-        stmt = stmt.where(Listing.brand_id == brand_id)
+        base = base.where(Listing.brand_id == brand_id)
     if search:
-        stmt = stmt.where(Listing.name.ilike(f"%{search}%"))
-    stmt = stmt.order_by(nulls_last(desc(Listing.created_at)))
-    stmt = stmt.offset(offset).limit(limit)
-    result = await session.execute(stmt)
-    return result.scalars().all()
+        base = base.where(Listing.name.ilike(f"%{search}%"))
+
+    # Count total matching rows
+    count_result = await session.execute(select(func.count()).select_from(base.subquery()))
+    total = count_result.scalar()
+
+    # Fetch paginated data
+    data_stmt = base.order_by(nulls_last(desc(Listing.created_at))).offset(skip).limit(limit)
+    result = await session.execute(data_stmt)
+    return {"data": result.scalars().all(), "total": total}
 
 
 @router.get("/listings/{id}", response_model=Listing)
