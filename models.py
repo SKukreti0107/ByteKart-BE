@@ -143,3 +143,13 @@ class SupportTicket(SQLModel, table=True):
     status: SupportTicketStatus = Field(default=SupportTicketStatus.OPEN, sa_column=Column(String, default=SupportTicketStatus.OPEN.value, index=True))
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     replied_at: Optional[str] = None
+
+class RedeemCode(SQLModel, table=True):
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    code: str = Field(sa_column=Column(String, unique=True, index=True))
+    discount_type: str = Field(default="flat")  # "flat" or "percentage"
+    discount_value: float = Field(default=0)
+    max_redeems: int = Field(default=1)
+    times_redeemed: int = Field(default=0)
+    is_active: bool = Field(default=True)
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
