@@ -81,7 +81,9 @@ class HeroContent(SQLModel, table=True):
     end_date: Optional[str] = None
 
 class OrderStatus(str, Enum):
-    PENDING = "pending"
+    REQUESTED = "requested"
+    APPROVED = "approved"
+    REJECTED = "rejected"
     PAID = "paid"
     FAILED = "failed"
     SHIPPED = "shipped"
@@ -103,7 +105,7 @@ class Order(SQLModel, table=True):
     shipping_address: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     shipping_fee: float = Field(default=0.0)
     total_amount: float
-    status: OrderStatus = Field(default=OrderStatus.PENDING, sa_column=Column(String, default=OrderStatus.PENDING.value, index=True))
+    status: OrderStatus = Field(default=OrderStatus.REQUESTED, sa_column=Column(String, default=OrderStatus.REQUESTED.value, index=True))
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class ReturnRequest(SQLModel, table=True):

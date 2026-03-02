@@ -63,25 +63,14 @@ async def create_order(
         applied_redeem_code = redeem
 
     total_amount = max(subtotal - discount + order_data.shipping_fee, 0)
-    razorpay_amount = int(total_amount * 100)
-
-    try:
-        razorpay_order = client.order.create({"amount": razorpay_amount, "currency": "INR"})
-    except Exception as e:
-        logging.error(f"Razorpay order creation failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Payment gateway error. Please try again."
-        )
 
     new_order = Order(
         user_id=current_user.id,
-        razorpay_order_id=razorpay_order["id"],
         items=cart.items,
         shipping_address=order_data.shipping_address,
         shipping_fee=order_data.shipping_fee,
         total_amount=total_amount,
-        status=OrderStatus.PENDING
+        status=OrderStatus.REQUESTED
     )
     session.add(new_order)
 
@@ -99,6 +88,10 @@ async def create_order(
     if applied_redeem_code:
         applied_redeem_code.times_redeemed += 1
         session.add(applied_redeem_code)
+        
+    # Clear the cart upon successful booking request
+    cart.items = []
+    session.add(cart)
 
     try:
         await session.commit()
@@ -111,7 +104,18 @@ async def create_order(
             detail="Could not process order."
         )
 
-    return razorpay_order
+    # Let admin know there is a new booking request
+    try:
+        await send_email_to_admin(
+            "new_booking_request",
+            f"Booking Request {new_order.id} has been placed",
+            f"Booking Request placed by {current_user.name} for items {', '.join([item['name'] for item in new_order.items])} and total amount is {new_order.total_amount}"
+        )
+    except Exception as e:
+        logging.error(f"Failed to send booking request email to admin: {e}")
+
+    return {"status": "success", "order_id": new_order.id, "message": "Booking request received"}
+
 
 
 @router.post("/verify/payment")
@@ -142,12 +146,6 @@ async def verify_payment_endpoint(
             order.status = OrderStatus.PAID
             order.razorpay_payment_id = payment_deets.razorpay_payment_id
             session.add(order)
-
-            cart_result = await session.execute(select(ShoppingCart).where(ShoppingCart.user_id == current_user.id))
-            cart = cart_result.scalars().first()
-            if cart:
-                cart.items = []
-                session.add(cart)
 
             try:
                 await session.commit()
@@ -229,3 +227,39 @@ async def get_order(
 @router.get("/razorpay/config")
 async def get_razorpay_config():
     return {"key_id": os.getenv("RAZOR_PAY_KEY_ID")}
+
+
+@router.post("/orders/{id}/pay")
+async def initiate_payment(
+    id: str,
+    current_user: User = Depends(get_db_user),
+    session: AsyncSession = Depends(get_session),
+    client=Depends(get_razorpay_client)
+):
+    result = await session.execute(select(Order).where(Order.id == id, Order.user_id == current_user.id))
+    order = result.scalars().first()
+    
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+        
+    if order.status != OrderStatus.APPROVED:
+        raise HTTPException(status_code=400, detail="Order is not approved for payment")
+        
+    if order.razorpay_order_id:
+        return {"id": order.razorpay_order_id, "amount": int(order.total_amount * 100), "currency": "INR"}
+
+    razorpay_amount = int(order.total_amount * 100)
+    try:
+        razorpay_order = client.order.create({"amount": razorpay_amount, "currency": "INR"})
+        order.razorpay_order_id = razorpay_order["id"]
+        session.add(order)
+        await session.commit()
+    except Exception as e:
+        logging.error(f"Razorpay order creation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Payment gateway error. Please try again."
+        )
+
+    return razorpay_order
+
