@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime, timezone
 
@@ -27,6 +27,7 @@ router = APIRouter()
 
 class OrderStatusUpdate(BaseModel):
     status: OrderStatus
+    final_price: Optional[float] = None
 
 class ReturnStatusUpdate(BaseModel):
     status: ReturnStatus
@@ -322,6 +323,11 @@ async def admin_update_order_status(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     order.status = update_data.status
+
+    # Allow admin to set a final negotiated price when converting request to order
+    if update_data.final_price is not None:
+        order.total_amount = update_data.final_price
+
     session.add(order)
     try:
         await session.commit()

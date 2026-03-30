@@ -396,7 +396,7 @@ async def send_support_acknowledgement_email(user_email: str, user_name: str, su
             </p>
         </div>
         <div style="background: #000000; padding: 20px; text-align: center;">
-            <p style="color: #666666; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; margin: 0;">© 2026 ByteKart — Greater Noida, India</p>
+            <p style="color: #666666; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; margin: 0;">© 2026 ByteKart </p>
         </div>
     </div>
     """
@@ -448,7 +448,7 @@ async def send_support_reply_email(user_email: str, user_name: str, original_sub
             </p>
         </div>
         <div style="background: #000000; padding: 20px; text-align: center;">
-            <p style="color: #666666; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; margin: 0;">© 2026 ByteKart — Greater Noida, India</p>
+            <p style="color: #666666; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; margin: 0;">© 2026 ByteKart </p>
         </div>
     </div>
     """

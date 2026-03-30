@@ -10,8 +10,10 @@ from typing import Dict, Optional
 from db import get_session
 from models import User, ShoppingCart, Order, OrderStatus, CheckoutDetails, RedeemCode
 from auth import get_db_user
-from helpers.verify_payment_sig import get_razorpay_client, verify_payment as verify_razorpay_payment
 from helpers.email_service import send_order_confirmation_email, send_email_to_admin
+
+# --- FUTURE: Razorpay Payment Integration ---
+# from helpers.verify_payment_sig import get_razorpay_client, verify_payment as verify_razorpay_payment
 
 router = APIRouter()
 
@@ -26,10 +28,11 @@ class OrderStatusUpdate(BaseModel):
     status: OrderStatus
 
 
-class PaymentsDeets(BaseModel):
-    razorpay_order_id: str
-    razorpay_payment_id: str
-    razorpay_signature: str
+# --- FUTURE: Razorpay Payment Integration ---
+# class PaymentsDeets(BaseModel):
+#     razorpay_order_id: str
+#     razorpay_payment_id: str
+#     razorpay_signature: str
 
 
 @router.post("/orders")
@@ -37,7 +40,6 @@ async def create_order(
     order_data: OrderData,
     current_user: User = Depends(get_db_user),
     session: AsyncSession = Depends(get_session),
-    client=Depends(get_razorpay_client)
 ):
     result = await session.execute(select(ShoppingCart).where(ShoppingCart.user_id == current_user.id))
     cart = result.scalars().first()
@@ -117,66 +119,68 @@ async def create_order(
     return {"status": "success", "order_id": new_order.id, "message": "Booking request received"}
 
 
-
-@router.post("/verify/payment")
-async def verify_payment_endpoint(
-    payment_deets: PaymentsDeets,
-    current_user: User = Depends(get_db_user),
-    session: AsyncSession = Depends(get_session),
-    client=Depends(get_razorpay_client),
-):
-    try:
-        is_valid = verify_razorpay_payment(
-            razorpay_order_id=payment_deets.razorpay_order_id,
-            razorpay_payment_id=payment_deets.razorpay_payment_id,
-            razorpay_signature=payment_deets.razorpay_signature,
-            client=client
-        )
-    except Exception as e:
-        logging.error(f"Razorpay verification error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Payment verification service error"
-        )
-
-    if is_valid:
-        result = await session.execute(select(Order).where(Order.razorpay_order_id == payment_deets.razorpay_order_id))
-        order = result.scalars().first()
-        if order:
-            order.status = OrderStatus.PAID
-            order.razorpay_payment_id = payment_deets.razorpay_payment_id
-            session.add(order)
-
-            try:
-                await session.commit()
-            except Exception as e:
-                await session.rollback()
-                logging.error(f"Database error during payment validation for Order {order.id}: {e}")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Payment validated but failed to update order status."
-                )
-
-            try:
-                await send_order_confirmation_email(
-                    user_email=current_user.email,
-                    user_name=current_user.name or "Customer",
-                    order_id=str(order.id),
-                    amount=order.total_amount,
-                    items=order.items,
-                    created_at=order.created_at
-                )
-                await send_email_to_admin(
-                    "new_order",
-                    f"Order {order.id} has been placed",
-                    f"Order placed by {current_user.name} for items {', '.join([item['name'] for item in order.items])} and total amount is {order.total_amount}"
-                )
-            except Exception as e:
-                logging.error(f"Failed to send order confirmation emails: {e}")
-
-        return {"status": "success", "message": "Payment verified successfully", "order_id": order.id if order else None}
-    else:
-        raise HTTPException(status_code=400, detail="Signature verification failed")
+# --- FUTURE: Razorpay Payment Integration ---
+# Uncomment the endpoints below when integrating Razorpay payments.
+#
+# @router.post("/verify/payment")
+# async def verify_payment_endpoint(
+#     payment_deets: PaymentsDeets,
+#     current_user: User = Depends(get_db_user),
+#     session: AsyncSession = Depends(get_session),
+#     client=Depends(get_razorpay_client),
+# ):
+#     try:
+#         is_valid = verify_razorpay_payment(
+#             razorpay_order_id=payment_deets.razorpay_order_id,
+#             razorpay_payment_id=payment_deets.razorpay_payment_id,
+#             razorpay_signature=payment_deets.razorpay_signature,
+#             client=client
+#         )
+#     except Exception as e:
+#         logging.error(f"Razorpay verification error: {e}")
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail="Payment verification service error"
+#         )
+#
+#     if is_valid:
+#         result = await session.execute(select(Order).where(Order.razorpay_order_id == payment_deets.razorpay_order_id))
+#         order = result.scalars().first()
+#         if order:
+#             order.status = OrderStatus.PAID
+#             order.razorpay_payment_id = payment_deets.razorpay_payment_id
+#             session.add(order)
+#
+#             try:
+#                 await session.commit()
+#             except Exception as e:
+#                 await session.rollback()
+#                 logging.error(f"Database error during payment validation for Order {order.id}: {e}")
+#                 raise HTTPException(
+#                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#                     detail="Payment validated but failed to update order status."
+#                 )
+#
+#             try:
+#                 await send_order_confirmation_email(
+#                     user_email=current_user.email,
+#                     user_name=current_user.name or "Customer",
+#                     order_id=str(order.id),
+#                     amount=order.total_amount,
+#                     items=order.items,
+#                     created_at=order.created_at
+#                 )
+#                 await send_email_to_admin(
+#                     "new_order",
+#                     f"Order {order.id} has been placed",
+#                     f"Order placed by {current_user.name} for items {', '.join([item['name'] for item in order.items])} and total amount is {order.total_amount}"
+#                 )
+#             except Exception as e:
+#                 logging.error(f"Failed to send order confirmation emails: {e}")
+#
+#         return {"status": "success", "message": "Payment verified successfully", "order_id": order.id if order else None}
+#     else:
+#         raise HTTPException(status_code=400, detail="Signature verification failed")
 
 
 @router.get("/user/shipping_address")
@@ -224,42 +228,45 @@ async def get_order(
     return order
 
 
-@router.get("/razorpay/config")
-async def get_razorpay_config():
-    return {"key_id": os.getenv("RAZOR_PAY_KEY_ID")}
-
-
-@router.post("/orders/{id}/pay")
-async def initiate_payment(
-    id: str,
-    current_user: User = Depends(get_db_user),
-    session: AsyncSession = Depends(get_session),
-    client=Depends(get_razorpay_client)
-):
-    result = await session.execute(select(Order).where(Order.id == id, Order.user_id == current_user.id))
-    order = result.scalars().first()
-    
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-        
-    if order.status != OrderStatus.APPROVED:
-        raise HTTPException(status_code=400, detail="Order is not approved for payment")
-        
-    if order.razorpay_order_id:
-        return {"id": order.razorpay_order_id, "amount": int(order.total_amount * 100), "currency": "INR"}
-
-    razorpay_amount = int(order.total_amount * 100)
-    try:
-        razorpay_order = client.order.create({"amount": razorpay_amount, "currency": "INR"})
-        order.razorpay_order_id = razorpay_order["id"]
-        session.add(order)
-        await session.commit()
-    except Exception as e:
-        logging.error(f"Razorpay order creation failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Payment gateway error. Please try again."
-        )
-
-    return razorpay_order
+# --- FUTURE: Razorpay Payment Integration ---
+# Uncomment the endpoints below when integrating Razorpay payments.
+#
+# @router.get("/razorpay/config")
+# async def get_razorpay_config():
+#     return {"key_id": os.getenv("RAZOR_PAY_KEY_ID")}
+#
+#
+# @router.post("/orders/{id}/pay")
+# async def initiate_payment(
+#     id: str,
+#     current_user: User = Depends(get_db_user),
+#     session: AsyncSession = Depends(get_session),
+#     client=Depends(get_razorpay_client)
+# ):
+#     result = await session.execute(select(Order).where(Order.id == id, Order.user_id == current_user.id))
+#     order = result.scalars().first()
+#
+#     if not order:
+#         raise HTTPException(status_code=404, detail="Order not found")
+#
+#     if order.status != OrderStatus.APPROVED:
+#         raise HTTPException(status_code=400, detail="Order is not approved for payment")
+#
+#     if order.razorpay_order_id:
+#         return {"id": order.razorpay_order_id, "amount": int(order.total_amount * 100), "currency": "INR"}
+#
+#     razorpay_amount = int(order.total_amount * 100)
+#     try:
+#         razorpay_order = client.order.create({"amount": razorpay_amount, "currency": "INR"})
+#         order.razorpay_order_id = razorpay_order["id"]
+#         session.add(order)
+#         await session.commit()
+#     except Exception as e:
+#         logging.error(f"Razorpay order creation failed: {e}")
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail="Payment gateway error. Please try again."
+#         )
+#
+#     return razorpay_order
 
