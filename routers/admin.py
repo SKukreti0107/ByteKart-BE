@@ -14,6 +14,7 @@ from models import (
     SupportTicket, SupportTicketStatus, Request
 )
 from auth import admin_only
+from cache import cache
 from helpers.email_service import (
     send_order_status_update_email, send_return_status_email,
     send_support_reply_email, send_order_confirmation_email
@@ -100,6 +101,7 @@ async def admin_create_category(
     session.add(category)
     await session.commit()
     await session.refresh(category)
+    cache.invalidate("categories")
     return category
 
 @router.put("/admin/category/{id}", response_model=Category)
@@ -119,6 +121,7 @@ async def admin_update_category(
     session.add(db_cat)
     await session.commit()
     await session.refresh(db_cat)
+    cache.invalidate("categories")
     return db_cat
 
 @router.delete("/admin/category/{id}")
@@ -133,6 +136,7 @@ async def admin_delete_category(
         raise HTTPException(status_code=404, detail="Category not found")
     await session.delete(db_cat)
     await session.commit()
+    cache.invalidate("categories")
     return {"message": "Category deleted successfully"}
 
 
@@ -147,6 +151,9 @@ async def admin_create_subcategory(
     session.add(subcategory)
     await session.commit()
     await session.refresh(subcategory)
+    # Invalidate all subcategory cache keys (any category_id variant)
+    cache.invalidate(f"subcategories:{subcategory.category_id}")
+    cache.invalidate("subcategories:all")
     return subcategory
 
 @router.put("/admin/subcategory/{id}", response_model=SubCategory)
@@ -166,6 +173,8 @@ async def admin_update_subcategory(
     session.add(db_sub)
     await session.commit()
     await session.refresh(db_sub)
+    cache.invalidate(f"subcategories:{db_sub.category_id}")
+    cache.invalidate("subcategories:all")
     return db_sub
 
 @router.delete("/admin/subcategory/{id}")
@@ -178,8 +187,11 @@ async def admin_delete_subcategory(
     db_sub = result.scalars().first()
     if not db_sub:
         raise HTTPException(status_code=404, detail="Subcategory not found")
+    category_id = db_sub.category_id
     await session.delete(db_sub)
     await session.commit()
+    cache.invalidate(f"subcategories:{category_id}")
+    cache.invalidate("subcategories:all")
     return {"message": "Subcategory deleted successfully"}
 
 
@@ -194,6 +206,7 @@ async def admin_create_brand(
     session.add(brand)
     await session.commit()
     await session.refresh(brand)
+    cache.invalidate("brands:all")
     return brand
 
 @router.put("/admin/brand/{id}", response_model=Brand)
@@ -213,6 +226,7 @@ async def admin_update_brand(
     session.add(db_brand)
     await session.commit()
     await session.refresh(db_brand)
+    cache.invalidate("brands:all")
     return db_brand
 
 @router.delete("/admin/brand/{id}")
@@ -227,6 +241,7 @@ async def admin_delete_brand(
         raise HTTPException(status_code=404, detail="Brand not found")
     await session.delete(db_brand)
     await session.commit()
+    cache.invalidate("brands:all")
     return {"message": "Brand deleted successfully"}
 
 
@@ -349,15 +364,17 @@ async def admin_get_all_returns(
     current_user: User = Depends(admin_only),
     session: AsyncSession = Depends(get_session)
 ):
-    result = await session.execute(select(ReturnRequest).order_by(ReturnRequest.created_at.desc()))
-    return_requests = result.scalars().all()
-    enriched = []
-    for rr in return_requests:
-        order_result = await session.execute(select(Order).where(Order.id == rr.order_id))
-        order = order_result.scalars().first()
-        user_result = await session.execute(select(User).where(User.id == rr.user_id))
-        user = user_result.scalars().first()
-        enriched.append({
+    # Single joined query instead of N+1 (was 2 queries per return request)
+    stmt = (
+        select(ReturnRequest, Order, User)
+        .join(Order, ReturnRequest.order_id == Order.id, isouter=True)
+        .join(User, ReturnRequest.user_id == User.id, isouter=True)
+        .order_by(ReturnRequest.created_at.desc())
+    )
+    result = await session.execute(stmt)
+    rows = result.all()
+    return [
+        {
             "id": rr.id,
             "order_id": rr.order_id,
             "reason": rr.reason,
@@ -367,8 +384,9 @@ async def admin_get_all_returns(
             "user_email": user.email if user else None,
             "total_amount": order.total_amount if order else None,
             "order_items": order.items if order else [],
-        })
-    return enriched
+        }
+        for rr, order, user in rows
+    ]
 
 @router.put("/admin/returns/{id}/status")
 async def admin_update_return_status(

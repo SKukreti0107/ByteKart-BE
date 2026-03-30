@@ -16,7 +16,7 @@ NEON_AUTH_JWKS_URL = os.getenv("NEON_AUTH_JWKS_URL")
 if not NEON_AUTH_JWKS_URL:
     raise ValueError("NEON_AUTH_JWKS_URL environment variable not set")
 
-jwks_client = PyJWKClient(NEON_AUTH_JWKS_URL)
+jwks_client = PyJWKClient(NEON_AUTH_JWKS_URL, cache_keys=True, lifespan=3600)
 security = HTTPBearer()
 
 def verify_token(token: str):
@@ -67,7 +67,7 @@ async def get_db_user(
     return user
 
 async def admin_only(user: User = Depends(get_db_user)):
-    print(f"Database User: {user}")
+
     if user.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, 

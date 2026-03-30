@@ -1,5 +1,22 @@
 import os
+import asyncio
 import resend
+
+# --- Template cache: load HTML files once, serve from memory ---
+_template_cache: dict[str, str | None] = {}
+
+def _load_template(template_name: str) -> str | None:
+    if template_name in _template_cache:
+        return _template_cache[template_name]
+    path = os.path.join("public", "email_template", template_name)
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+        _template_cache[template_name] = content
+        return content
+    _template_cache[template_name] = None
+    return None
+
 
 def get_resend_client():
     api_key = os.getenv("RESEND_API_KEY")
@@ -31,11 +48,9 @@ async def send_order_confirmation_email(user_email: str, user_name: str, order_i
 
     display_amount = int(amount) if amount == int(amount) else amount
     
-    # Load local template
-    template_path = os.path.join("public", "email_template", "order_status.html")
-    if os.path.exists(template_path):
-        with open(template_path, "r", encoding="utf-8") as f:
-            html_content = f.read()
+    # Load template (cached)
+    html_content = _load_template("order_status.html")
+    if html_content:
         
         # Initial status config (Placed)
         status_config = {
@@ -60,7 +75,7 @@ async def send_order_confirmation_email(user_email: str, user_name: str, order_i
         html_content = html_content.replace("{{ITEM_LIST}}", item_list_html)
         html_content = html_content.replace("{{TOTAL_AMOUNT}}", str(display_amount))
     else:
-        print(f"Warning: Template not found at {template_path}. Falling back to simple HTML.")
+        print(f"Warning: Template order_status.html not found. Falling back to simple HTML.")
         html_content = f"<h1>Order Confirmed</h1><p>Hi {user_name}, your order {order_id} has been placed.</p>{item_list_html}<p>Total: ₹{display_amount}</p>"
 
     try:
@@ -136,11 +151,9 @@ async def send_order_status_update_email(user_email: str, user_name: str, order_
     est_delivery = (datetime.datetime.now() + datetime.timedelta(days=3)).strftime("%b %d, %Y")
     display_amount = int(amount) if amount == int(amount) else amount
 
-    # Load local template
-    template_path = os.path.join("public", "email_template", "order_status.html")
-    if os.path.exists(template_path):
-        with open(template_path, "r", encoding="utf-8") as f:
-            html_content = f.read()
+    # Load template (cached)
+    html_content = _load_template("order_status.html")
+    if html_content:
         
         # Replace placeholders
         html_content = html_content.replace("{{USER_NAME}}", user_name)
@@ -196,11 +209,9 @@ async def send_thanks_after_delivery_email(user_email: str, user_name: str, orde
     item_list_html += "</table>"
     display_amount = int(amount) if amount == int(amount) else amount
 
-    # Load local template
-    template_path = os.path.join("public", "email_template", "our_thanks.html")
-    if os.path.exists(template_path):
-        with open(template_path, "r", encoding="utf-8") as f:
-            html_content = f.read()
+    # Load template (cached)
+    html_content = _load_template("our_thanks.html")
+    if html_content:
         
         # Replace placeholders
         html_content = html_content.replace("{{USER_NAME}}", user_name)
@@ -288,11 +299,9 @@ async def send_return_status_email(user_email: str, user_name: str, order_id: st
 
     config = status_configs.get(return_status.lower(), status_configs["return_requested"])
 
-    # Load return template
-    template_path = os.path.join("public", "email_template", "return_status.html")
-    if os.path.exists(template_path):
-        with open(template_path, "r", encoding="utf-8") as f:
-            html_content = f.read()
+    # Load template (cached)
+    html_content = _load_template("return_status.html")
+    if html_content:
 
         html_content = html_content.replace("{{HERO_TITLE}}", config["hero_title"])
         html_content = html_content.replace("{{HERO_COLOR}}", config["hero_color"])
@@ -334,8 +343,7 @@ async def send_email_to_admin(action:str ,subject: str, body: str):
     if not client:
         return
 
-    import time 
-    time.sleep(5)
+    await asyncio.sleep(5)
     try:
         admin_emails = ["shubhamkukreti.0107@gmail.com","nathansaul20@gmail.com"]
         if action == "new_order":

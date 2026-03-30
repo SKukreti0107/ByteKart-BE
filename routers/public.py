@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from db import get_session
 from models import Product, Listing, Category, SubCategory, Brand, HeroContent, GlobalNotice
+from cache import cache
 
 router = APIRouter()
 
@@ -88,8 +89,13 @@ async def get_listing(id: str, session: AsyncSession = Depends(get_session)):
 @router.get("/categories", response_model=list[Category])
 async def list_categories(response: Response, session: AsyncSession = Depends(get_session)):
     response.headers["Cache-Control"] = "public, max-age=300"
+    cached = cache.get("categories")
+    if cached is not None:
+        return cached
     result = await session.execute(select(Category))
-    return result.scalars().all()
+    data = result.scalars().all()
+    cache.set("categories", data)
+    return data
 
 
 @router.get("/subCategories", response_model=list[SubCategory])
@@ -99,11 +105,17 @@ async def list_sub_categories(
     category_id: Optional[str] = Query(None),
 ):
     response.headers["Cache-Control"] = "public, max-age=300"
+    cache_key = f"subcategories:{category_id or 'all'}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
     stmt = select(SubCategory)
     if category_id:
         stmt = stmt.where(SubCategory.category_id == category_id)
     result = await session.execute(stmt)
-    return result.scalars().all()
+    data = result.scalars().all()
+    cache.set(cache_key, data)
+    return data
 
 
 @router.get("/brands", response_model=List[Brand])
@@ -113,13 +125,19 @@ async def list_brands(
     subCategory_id: Optional[str] = Query(None)
 ):
     response.headers["Cache-Control"] = "public, max-age=300"
+    cache_key = f"brands:{subCategory_id or 'all'}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
     stmt = select(Brand)
     if subCategory_id:
         stmt = stmt.join(Listing, Brand.id == Listing.brand_id).where(
             Listing.subcategory_id == subCategory_id
         ).distinct()
     result = await session.execute(stmt)
-    return result.scalars().all()
+    data = result.scalars().all()
+    cache.set(cache_key, data)
+    return data
 
 
 @router.get("/notice")

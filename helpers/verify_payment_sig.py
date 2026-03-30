@@ -8,9 +8,13 @@ key_id = os.getenv("RAZOR_PAY_KEY_ID")
 key_secret = os.getenv("RAZOR_PAY_API_KEY")
 
 
+_razorpay_client = None
+
 def get_razorpay_client():
-    client = razorpay.Client(auth=(key_id, key_secret))
-    return client
+    global _razorpay_client
+    if _razorpay_client is None:
+        _razorpay_client = razorpay.Client(auth=(key_id, key_secret))
+    return _razorpay_client
 
 def verify_payment(razorpay_order_id:str,razorpay_payment_id:str,razorpay_signature:str,client=None):
     if client is None:
